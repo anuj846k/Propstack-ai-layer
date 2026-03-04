@@ -1,0 +1,29 @@
+[project]
+name = "propstack-ai"
+version = "0.1.0"
+description = "PropStack AI Layer — Rent Collection Agent powered by Google ADK"
+requires-python = ">=3.10"
+dependencies = [
+    "google-adk",
+    "google-genai",
+    "fastapi",
+    "uvicorn[standard]",
+    "pydantic>=2.0",
+    "pydantic-settings",
+    "supabase",
+    "twilio",
+    "httpx",
+    "python-multipart",
+    "python-dotenv",
+    "audioop-lts; python_version >= '3.13'",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "ruff",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
