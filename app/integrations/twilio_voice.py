@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import base64
-from urllib.parse import urlencode, urlparse, urlunparse
 from typing import Any
+from urllib.parse import urlencode, urlparse, urlunparse
 
 try:
     import audioop  # Python <=3.12 builtin or backported module.
@@ -27,7 +27,6 @@ else:
     _TWILIO_IMPORT_ERROR = None
 
 from app.config import settings
-
 
 TERMINAL_STATUSES = {"completed", "busy", "no-answer", "failed", "canceled"}
 
@@ -75,23 +74,6 @@ def twilio_media_stream_url(call_id: str) -> str:
     return f"{_ws_base_url()}/api/v1/calls/live/twilio/media/{call_id}"
 
 
-def parse_trial_allowlist() -> set[str]:
-    raw = settings.twilio_trial_allowed_to_numbers or ""
-    return {part.strip() for part in raw.split(",") if part.strip()}
-
-
-def check_trial_number_allowed(to_number: str) -> tuple[bool, str | None]:
-    if not settings.twilio_trial_mode:
-        return True, None
-
-    normalized = to_number.strip()
-    allowlist = parse_trial_allowlist()
-    if normalized in allowlist:
-        return True, None
-
-    return False, "Twilio trial can call only verified numbers. Add this number to trial allowlist and verify it in Twilio."
-
-
 def create_outbound_call(*, to_number: str, call_id: str) -> dict:
     call = get_client().calls.create(
         to=to_number,
@@ -109,7 +91,9 @@ def create_outbound_call(*, to_number: str, call_id: str) -> dict:
     }
 
 
-def validate_signature(*, url: str, params: dict[str, str], signature: str | None) -> bool:
+def validate_signature(
+    *, url: str, params: dict[str, str], signature: str | None
+) -> bool:
     if not settings.twilio_validate_webhook_signature:
         return True
     if not signature:

@@ -43,6 +43,127 @@ class _FakeSupabase:
         return _FakeQuery([])
 
 
+class _ChatMemoryQuery:
+    def __init__(self, db, table_name: str):
+        self.db = db
+        self.table_name = table_name
+        self._filters: list[tuple[str, object]] = []
+        self._limit: int | None = None
+        self._order_field: str | None = None
+        self._order_desc: bool = False
+        self._mode: str = "select"
+        self._payload: dict | None = None
+
+    def select(self, *_args, **_kwargs):
+        self._mode = "select"
+        return self
+
+    def eq(self, field: str, value):
+        self._filters.append((field, value))
+        return self
+
+    def order(self, field: str, desc: bool = False):
+        self._order_field = field
+        self._order_desc = desc
+        return self
+
+    def limit(self, n: int):
+        self._limit = n
+        return self
+
+    def insert(self, payload: dict):
+        self._mode = "insert"
+        self._payload = payload
+        return self
+
+    def update(self, payload: dict):
+        self._mode = "update"
+        self._payload = payload
+        return self
+
+    def _rows(self) -> list[dict]:
+        return self.db.conversations if self.table_name == "conversations" else self.db.chat_messages
+
+    def _filtered(self) -> list[dict]:
+        rows = list(self._rows())
+        for field, value in self._filters:
+            rows = [r for r in rows if r.get(field) == value]
+        if self._order_field:
+            rows = sorted(
+                rows,
+                key=lambda x: x.get(self._order_field) or "",
+                reverse=self._order_desc,
+            )
+        if self._limit is not None:
+            rows = rows[: self._limit]
+        return rows
+
+    def execute(self):
+        if self._mode == "insert":
+            row = dict(self._payload or {})
+            if self.table_name == "conversations":
+                self.db._conv_counter += 1
+                row.setdefault("id", f"conv-{self.db._conv_counter}")
+                row.setdefault("created_at", "2026-01-01T00:00:00Z")
+                self.db.conversations.append(row)
+            else:
+                self.db._msg_counter += 1
+                row.setdefault("id", f"msg-{self.db._msg_counter}")
+                row.setdefault("created_at", "2026-01-01T00:00:00Z")
+                self.db.chat_messages.append(row)
+            return SimpleNamespace(data=[row], count=1)
+
+        if self._mode == "update":
+            rows = self._filtered()
+            for row in rows:
+                row.update(self._payload or {})
+            return SimpleNamespace(data=rows, count=len(rows))
+
+        rows = self._filtered()
+        return SimpleNamespace(data=rows, count=len(rows))
+
+
+class _ChatMemorySupabase:
+    def __init__(self):
+        self.conversations: list[dict] = []
+        self.chat_messages: list[dict] = []
+        self._conv_counter = 0
+        self._msg_counter = 0
+
+    def table(self, name: str):
+        return _ChatMemoryQuery(self, name)
+
+
+def test_chat_stream_persists_messages(monkeypatch) -> None:
+    fake_sb = _ChatMemorySupabase()
+    monkeypatch.setattr(rent, "get_supabase", lambda: fake_sb)
+    monkeypatch.setattr(rent.settings, "internal_api_secret", "secret")
+
+    async def _fake_stream_agent(**_kwargs):
+        yield "Hello "
+        yield "there"
+
+    monkeypatch.setattr(rent, "_stream_agent", _fake_stream_agent)
+
+    response = client.post(
+        "/api/v1/chat",
+        headers={"x-internal-secret": "secret", "x-landlord-id": "l1"},
+        json={"user_id": "landlord-1", "message": "Hi Sara"},
+    )
+
+    assert response.status_code == 200
+    assert response.text == "Hello there"
+    assert len(fake_sb.conversations) == 1
+    assert len(fake_sb.chat_messages) == 2
+    assert fake_sb.chat_messages[0]["sender_type"] == "landlord"
+    assert fake_sb.chat_messages[0]["sender_id"] == "l1"
+    assert fake_sb.chat_messages[0]["message_text"] == "Hi Sara"
+    assert fake_sb.chat_messages[1]["sender_type"] == "ai"
+    assert fake_sb.chat_messages[1]["sender_id"] == "l1"
+    assert fake_sb.chat_messages[1]["message_text"] == "Hello there"
+    assert fake_sb.chat_messages[0]["metadata"]["session_id"]
+
+
 def test_sweep_requires_internal_token(monkeypatch) -> None:
     monkeypatch.setattr(rent.settings, "internal_scheduler_token", "secret-token")
 

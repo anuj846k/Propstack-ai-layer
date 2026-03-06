@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any
-
 from google.adk.agents import LlmAgent
+from google.adk.planners import BuiltInPlanner
 from google.genai import types
 
+from app.agents.shared import after_tool_normalizer, before_tool_guardrail
 from app.config import settings
-from app.dependencies import get_supabase
-from app.services import call_policy_service
 from app.tools.call_tools import initiate_rent_collection_call, save_call_result
 from app.tools.notification_tools import create_notification
 from app.tools.rent_tools import (
@@ -22,153 +19,14 @@ from app.tools.rent_tools import (
 from app.tools.tenant_tools import find_tenant_by_name, find_tenant_by_phone
 from app.tools.voice_tools import get_tenant_details
 
-
-def _tool_envelope(
-    status: str,
-    message: str,
-    data: dict[str, Any] | None = None,
-    error_message: str | None = None,
-) -> dict[str, Any]:
-    return {
-        "status": status,
-        "message": message,
-        "data": data,
-        "error_message": error_message,
-    }
-
-
-def _before_tool_guardrail(
-    tool,
-    args: dict[str, Any] | None = None,
-    tool_context=None,
-    context=None,
-    **_kwargs,
-) -> dict | None:
-    """Apply deterministic guardrails before tool execution."""
-    ctx = tool_context or context
-    if ctx is None:
-        return _tool_envelope(
-            status="blocked",
-            message="Call blocked: tool context is missing.",
-            data={"blocked_by": "before_tool_guardrail"},
-            error_message="Missing tool context",
-        )
-    args = args or {}
-
-    ctx.state["temp:last_requested_tool"] = tool.name
-    ctx.state["app:call_window_ist"] = (
-        f"{settings.call_window_start_hour:02d}:00-{settings.call_window_end_hour:02d}:00"
-    )
-
-    if tool.name != "initiate_rent_collection_call":
-        return None
-
-    landlord_id = str(args.get("landlord_id") or "").strip()
-    tenant_id = str(args.get("tenant_id") or "").strip()
-
-    if landlord_id:
-        ctx.state["user:last_landlord_id"] = landlord_id
-
-    if not landlord_id or not tenant_id:
-        return _tool_envelope(
-            status="blocked",
-            message="Call blocked: landlord_id and tenant_id are required.",
-            data={"blocked_by": "before_tool_guardrail"},
-            error_message="Missing landlord_id or tenant_id",
-        )
-
-    sb = get_supabase()
-    if not call_policy_service.validate_tenant_landlord_ownership(sb, landlord_id, tenant_id):
-        return _tool_envelope(
-            status="blocked",
-            message="Call blocked: tenant does not belong to the landlord.",
-            data={"blocked_by": "before_tool_guardrail"},
-            error_message="Landlord/tenant ownership validation failed",
-        )
-
-    limits = call_policy_service.get_policy_limits()
-    attempts_today = call_policy_service.count_call_attempts_today(
-        sb,
-        tenant_id=tenant_id,
-        landlord_id=landlord_id,
-        now_utc=datetime.now(timezone.utc),
-    )
-
-    allowed, reason = call_policy_service.evaluate_call_policy(
-        attempts_today=attempts_today,
-        now_utc=datetime.now(timezone.utc),
-        start_hour_ist=limits["start_hour_ist"],
-        end_hour_ist=limits["end_hour_ist"],
-        max_attempts_per_day=limits["max_attempts_per_day"],
-    )
-
-    ctx.state["temp:last_call_attempts_today"] = attempts_today
-    if not allowed:
-        return _tool_envelope(
-            status="blocked",
-            message=reason,
-            data={
-                "blocked_by": "before_tool_guardrail",
-                "attempts_today": attempts_today,
-            },
-            error_message=reason,
-        )
-
-    return None
-
-
-def _after_tool_normalizer(
-    tool,
-    args: dict[str, Any] | None = None,
-    tool_context=None,
-    context=None,
-    tool_response: dict | None = None,
-    response: dict | None = None,
-    **_kwargs,
-) -> dict:
-    """Normalize tool outputs into a consistent status/message/data envelope."""
-    ctx = tool_context or context
-    args = args or {}
-    raw_response = tool_response if tool_response is not None else response
-
-    if (
-        isinstance(raw_response, dict)
-        and "status" in raw_response
-        and "message" in raw_response
-        and "data" in raw_response
-    ):
-        normalized = {
-            "status": raw_response.get("status"),
-            "message": raw_response.get("message"),
-            "data": raw_response.get("data"),
-            "error_message": raw_response.get("error_message"),
-        }
-    else:
-        normalized = _tool_envelope(
-            status="success",
-            message=f"{tool.name} completed",
-            data=raw_response if isinstance(raw_response, dict) else {"result": raw_response},
-            error_message=None,
-        )
-
-    if ctx is not None:
-        ctx.state["temp:last_tool_status"] = normalized.get("status")
-        ctx.state["temp:last_tool_summary"] = f"{tool.name}:{normalized.get('status')}"
-
-    landlord_id = args.get("landlord_id")
-    if landlord_id and ctx is not None:
-        ctx.state["user:last_landlord_id"] = landlord_id
-
-    return normalized
-
-
-root_agent = LlmAgent(
-    name="rent_collection_agent",
+rent_agent = LlmAgent(
+    name="rent_agent",
     model=settings.gemini_model,
     description=(
         "Manages rent collection by checking payment status, "
         "calling overdue tenants, and logging outcomes for the landlord dashboard."
     ),
+    planner=BuiltInPlanner(thinking_config=types.ThinkingConfig(thinking_budget=512)),
     instruction="""
 # Identity
 You are Sara, Rent Collection Coordinator at PropStack.
@@ -180,7 +38,29 @@ Handle rent collections while following deterministic guardrails and tool protoc
 - If the user just says hi, hello, hey, or any casual greeting, respond with a friendly greeting and ask how you can help.
 - Do NOT automatically fetch tenant data, payment history, or call history unless explicitly asked.
 - Do NOT assume the user wants to make a call - wait for them to explicitly request it.
+- **IMPORTANT**: If the user says the database is updated or implies the information is wrong/stale, ALWAYS call the relevant tools (`get_tenants_with_rent_status` or `get_tenant_details`) again to fetch the latest data. Do NOT rely on information from previous turns in the chat history.
+- **Phone Number Accuracy**: Only report phone numbers found in the `users` table via `get_tenant_details` or `find_tenant_by_name`. Do NOT use phone numbers mentioned in the `summary` of `call_logs` or `collection_history`, as they may be outdated test entries.
 - Only use tools when the user specifically asks for tenant information, payment status, or to initiate a call.
+
+# Transcript Display Format (IMPORTANT)
+When displaying call history or transcripts, ALWAYS format them clearly with line breaks:
+- Start each call with "📞 Call - [Date]" on its own line
+- Use "**User:**" and "**Sara:**" labels on separate lines
+- Put each exchange on its own line
+- Add blank lines between exchanges for readability
+- Example format:
+
+📞 Call - March 5, 2026 at 6:47 PM
+Outcome: Completed
+
+**User:** "Nahi phir ho cancel. ruk jaa..."
+**Sara:** "Hello Ansh Kumar Gupta, this is Sara from PropStack..."
+
+**User:** "अरे, रही है।"
+**Sara:** "ठीक है, कोई बात नहीं..."
+
+---
+This ensures the transcript is readable in the chat UI with proper line breaks.
 
 # Landlord Identity
 - The landlord is the currently authenticated dashboard user.
@@ -217,6 +97,7 @@ Handle rent collections while following deterministic guardrails and tool protoc
     tools=[
         find_tenant_by_name,
         find_tenant_by_phone,
+        get_tenant_details,
         get_tenants_with_rent_status,
         get_tenant_payment_history,
         get_tenant_collection_history,
@@ -225,8 +106,8 @@ Handle rent collections while following deterministic guardrails and tool protoc
         save_call_result,
         create_notification,
     ],
-    before_tool_callback=_before_tool_guardrail,
-    after_tool_callback=_after_tool_normalizer,
+    before_tool_callback=before_tool_guardrail,
+    after_tool_callback=after_tool_normalizer,
     generate_content_config=types.GenerateContentConfig(
         temperature=0.2,
     ),
@@ -240,6 +121,8 @@ voice_agent = LlmAgent(
         "Voice agent for rent collection calls in Hindi/English. "
         "Short, polite responses suitable for voice conversations."
     ),
+    # Each voice call starts fresh — do not inherit landlord chat history
+    include_contents="none",
     instruction="""
 # Identity
 You are Sara, Rent Collection Coordinator at PropStack calling from PropStack.

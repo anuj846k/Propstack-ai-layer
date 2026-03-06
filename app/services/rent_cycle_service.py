@@ -7,7 +7,6 @@ from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
 from app.config import settings
-
 IST = ZoneInfo("Asia/Kolkata")
 
 

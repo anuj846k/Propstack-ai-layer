@@ -245,3 +245,52 @@ class LiveSessionEndResponse(BaseModel):
     live_state: str = Field(description="Final live session state")
     outcome: str = Field(description="Final persisted call outcome")
     duration_seconds: int = Field(description="Resolved call duration in seconds")
+
+
+# Chat Message Schemas
+class SendMessageRequest(BaseModel):
+    conversation_id: str | None = Field(default=None, description="Existing conversation ID")
+    landlord_id: str = Field(description="Landlord UUID")
+    tenant_id: str | None = Field(default=None, description="Tenant UUID (for tenant-initiated)")
+    message: str = Field(description="Message text")
+    sender_type: Literal["landlord", "tenant", "ai"] = Field(description="Who sent the message")
+    channel: Literal["chat", "whatsapp", "voice"] = Field(default="chat", description="Communication channel")
+
+
+class SendMessageResponse(BaseModel):
+    status: str = Field(description="success or error")
+    conversation_id: str = Field(description="Conversation ID")
+    message_id: str = Field(description="Saved message ID")
+
+
+class GetConversationRequest(BaseModel):
+    landlord_id: str = Field(description="Landlord UUID")
+    tenant_id: str | None = Field(default=None, description="Filter by tenant")
+    conversation_id: str | None = Field(default=None, description="Specific conversation ID")
+    limit: int = Field(default=50, ge=1, le=100)
+
+
+class ChatMessage(BaseModel):
+    id: str
+    conversation_id: str
+    sender_id: str | None
+    sender_type: str
+    message_text: str
+    metadata: dict[str, Any]
+    created_at: str
+
+
+class Conversation(BaseModel):
+    id: str
+    landlord_id: str
+    tenant_id: str | None
+    channel: str
+    status: str
+    last_message_at: str
+    created_at: str
+    messages: list[ChatMessage] = Field(default_factory=list)
+
+
+class GetConversationResponse(BaseModel):
+    status: str = Field(description="success or error")
+    conversations: list[Conversation] = Field(default_factory=list)

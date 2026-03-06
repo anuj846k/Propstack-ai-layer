@@ -1,13 +1,15 @@
 """Voice call tools for tenant information."""
 
 import asyncio
+from datetime import datetime, timezone
+
 from app.dependencies import get_supabase
 
 
 def _fetch_tenant_details(tenant_id: str) -> dict:
     """Fetch tenant details including property and landlord info."""
     sb = get_supabase()
-    
+
     # Get active tenancy for this tenant
     tenancy = (
         sb.table("tenancies")
@@ -34,19 +36,19 @@ def _fetch_tenant_details(tenant_id: str) -> dict:
         .limit(1)
         .execute()
     )
-    
+
     if not tenancy.data:
         return {
             "status": "error",
-            "error_message": "No active tenancy found for this tenant"
+            "error_message": "No active tenancy found for this tenant",
         }
-    
+
     data = tenancy.data[0]
     tenant_user = data.get("users") or {}
     unit = data.get("units") or {}
     prop = unit.get("properties") or {}
     landlord_id = prop.get("landlord_id")
-    
+
     # Get landlord info separately
     landlord = {}
     if landlord_id:
@@ -59,7 +61,7 @@ def _fetch_tenant_details(tenant_id: str) -> dict:
         )
         if landlord_res.data:
             landlord = landlord_res.data[0]
-    
+
     return {
         "status": "success",
         "tenant": {
@@ -78,7 +80,9 @@ def _fetch_tenant_details(tenant_id: str) -> dict:
             "rent_amount": float(unit.get("rent_amount") or 0),
         },
         "tenancy": {
-            "start_date": str(data.get("start_date")) if data.get("start_date") else None,
+            "start_date": str(data.get("start_date"))
+            if data.get("start_date")
+            else None,
             "end_date": str(data.get("end_date")) if data.get("end_date") else None,
             "deposit_amount": float(data.get("deposit_amount") or 0),
         },
@@ -86,20 +90,21 @@ def _fetch_tenant_details(tenant_id: str) -> dict:
             "name": landlord.get("name"),
             "phone": landlord.get("phone"),
             "email": landlord.get("email"),
-        }
+        },
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
     }
 
 
 async def get_tenant_details(tenant_id: str) -> dict:
     """Get tenant details including property and landlord info.
-    
+
     Use this tool to answer tenant questions about their property, rent amount,
     or landlord information. The tool returns English data - translate to tenant's
     language when responding.
-    
+
     Args:
         tenant_id: The tenant's user ID
-        
+
     Returns:
         Tenant details including property name, rent amount, landlord info
     """

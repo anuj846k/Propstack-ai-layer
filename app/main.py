@@ -1,9 +1,9 @@
 """PropStack AI Service — load .env before any Google GenAI/ADK imports."""
-# ruff: noqa: E402
-from pathlib import Path
 
+# ruff: noqa: E402
 import logging
 import os
+from pathlib import Path
 
 log_level = getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO)
 
@@ -23,13 +23,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.routers import payments, rent, properties
+from app.routers import payments, properties, rent, twilio
 from app.services.live_session_service import live_session_service
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    live_session_service.cleanup_expired(max_age_seconds=settings.live_session_max_seconds)
+    live_session_service.cleanup_expired(
+        max_age_seconds=settings.live_session_max_seconds
+    )
     try:
         yield
     finally:
@@ -55,6 +57,7 @@ app.add_middleware(
 )
 
 app.include_router(rent.router, prefix="/api/v1", tags=["rent"])
+app.include_router(twilio.router, prefix="/api/v1", tags=["twilio"])
 app.include_router(payments.router, prefix="/api/v1/payments", tags=["payments"])
 app.include_router(properties.router, prefix="/api/v1", tags=["properties"])
 

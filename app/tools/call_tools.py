@@ -69,19 +69,16 @@ def _insert_call_log(
     return call_log.data[0]["id"] if call_log.data else None
 
 
-def _update_call_log_summary(sb, call_id: str, summary: str, outcome: str | None = None) -> None:
+def _update_call_log_summary(
+    sb, call_id: str, summary: str, outcome: str | None = None
+) -> None:
     payload: dict[str, Any] = {
         "summary": summary,
     }
     if outcome:
         payload["outcome"] = outcome
 
-    (
-        sb.table("call_logs")
-        .update(payload)
-        .eq("id", call_id)
-        .execute()
-    )
+    (sb.table("call_logs").update(payload).eq("id", call_id).execute())
 
 
 def _create_call_log(
@@ -134,27 +131,6 @@ def _create_call_log(
                 "live_session_id": None,
             },
             error_message=config_error,
-        )
-
-    allowed, trial_message = twilio_voice.check_trial_number_allowed(tenant_phone)
-    if not allowed:
-        _update_call_log_summary(
-            sb,
-            call_id,
-            f"Call blocked by trial guard for tenant {tenant_phone}: {trial_message}",
-            outcome="failed",
-        )
-        return _envelope(
-            status="failed",
-            message=trial_message or "Twilio trial restriction",
-            data={
-                "call_id": call_id,
-                "provider": "twilio_voice",
-                "provider_status": "trial_blocked",
-                "live_session_enabled": bool(settings.enable_partner_twilio_live),
-                "live_session_id": None,
-            },
-            error_message=trial_message,
         )
 
     try:

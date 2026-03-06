@@ -1,41 +1,38 @@
 import asyncio
-import contextlib
 import json
 import logging
 import re
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Header, HTTPException, Request, Response, WebSocket, WebSocketDisconnect, Depends
+from fastapi import (
+    APIRouter,
+    Depends,
+    Header,
+    HTTPException,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import StreamingResponse
 from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.adk.runners import Runner
-from google.adk.sessions import InMemorySessionService
-from google.adk.agents.live_request_queue import LiveRequestQueue
 from google.genai import types
 
-from app.agents.rent_collection.agent import root_agent, voice_agent
+from app.agents import hub_agent
 from app.config import settings
 from app.dependencies import get_supabase, verify_internal_request
-from app.integrations import twilio_voice
 from app.schemas.rent import (
-    CallCallbackRequest,
-    CallCallbackResponse,
     CallInitiationRequest,
     CallInitiationResponse,
     ChatRequest,
-    LiveSessionEndRequest,
-    LiveSessionEndResponse,
-    LiveSessionStartRequest,
-    LiveSessionStartResponse,
     SweepAction,
     SweepRequest,
     SweepResponse,
-    TwilioStatusCallbackResponse,
 )
 from app.services import call_policy_service, rent_cycle_service
-from app.services.live_session_service import live_session_service
-from app.tools.call_tools import initiate_rent_collection_call, save_call_result
+from app.services.session_service import get_session_service
+from app.tools.call_tools import initiate_rent_collection_call
 from app.tools.notification_tools import create_notification
 from app.tools.rent_tools import (
     get_tenant_collection_history,
@@ -47,19 +44,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-session_service = InMemorySessionService()
+session_service = get_session_service()
 runner = Runner(
-    agent=root_agent,
+    agent=hub_agent,
     app_name="propstack_rent",
     session_service=session_service,
-    auto_create_session=True,
-)
-
-voice_session_service = InMemorySessionService()
-voice_runner = Runner(
-    agent=voice_agent,
-    app_name="propstack_rent_voice",
-    session_service=voice_session_service,
     auto_create_session=True,
 )
 
@@ -78,10 +67,12 @@ async def _stream_agent(
     """Run the rent collection agent and stream text deltas."""
     full_prompt = prompt
     if landlord_id:
-        # Provide landlord_id as context to the agent so it doesn't need to ask for it.
+        landlord_name = _find_landlord_name(landlord_id)
+        # Provide landlord_id and name as context to the agent so it doesn't need to ask for it.
         full_prompt = (
             f"{prompt}\n\n"
-            f"[Context: The authenticated landlord ID for this conversation is {landlord_id}. "
+            f"[Context: The authenticated user for this conversation is a landlord named '{landlord_name}' (ID: {landlord_id}). "
+            f"If the user asks who they are or what their name is, confidently tell them they are {landlord_name}. "
             f"Do NOT ask the user to provide their landlord ID. "
             f"Use this landlord_id when calling tools that require it.]"
         )
@@ -125,9 +116,18 @@ async def _run_agent(user_id: str, prompt: str) -> str:
         user_id=user_id,
     )
 
+    landlord_name = _find_landlord_name(user_id)
+    full_prompt = (
+        f"{prompt}\n\n"
+        f"[Context: The authenticated user for this conversation is a landlord named '{landlord_name}' (ID: {user_id}). "
+        f"If the user asks who they are or what their name is, confidently tell them they are {landlord_name}. "
+        f"Do NOT ask the user to provide their landlord ID. "
+        f"Use this landlord_id when calling tools that require it.]"
+    )
+
     message = types.Content(
         role="user",
-        parts=[types.Part(text=prompt)],
+        parts=[types.Part(text=full_prompt)],
     )
 
     final_text = ""
@@ -178,8 +178,14 @@ def _extract_landlord_id_from_initiated_by(initiated_by: str | None) -> str | No
     return None
 
 
-async def _chat_stream(request: ChatRequest, landlord_id: str | None = None):
-    session_id = request.session_id or str(uuid.uuid4())
+async def _chat_stream(
+    request: ChatRequest, landlord_id: str | None = None, session_id: str | None = None
+):
+    # session_id should always be a valid UUID at this point (validated in the endpoint)
+    # If not provided, generate one
+    if not session_id:
+        session_id = str(uuid.uuid4())
+
     async for chunk in _stream_agent(
         user_id=request.user_id,
         session_id=session_id,
@@ -237,13 +243,7 @@ def _validate_callback_secret(secret: str) -> None:
 
 def _find_landlord_name(landlord_id: str) -> str:
     sb = get_supabase()
-    result = (
-        sb.table("users")
-        .select("name")
-        .eq("id", landlord_id)
-        .limit(1)
-        .execute()
-    )
+    result = sb.table("users").select("name").eq("id", landlord_id).limit(1).execute()
     if result.data:
         return result.data[0].get("name") or "Landlord"
     return "Landlord"
@@ -260,9 +260,9 @@ def _find_call_log(call_id: str) -> dict | None:
     )
     if not call_row.data:
         return None
-    
+
     data = call_row.data[0]
-    
+
     # Fetch tenant details for dynamic greeting
     # tenant_id in call_logs is actually a user_id (tenant)
     if data.get("tenant_id"):
@@ -284,12 +284,12 @@ def _find_call_log(call_id: str) -> dict | None:
             user_data = tenant_data.get("users") or {}
             unit_data = tenant_data.get("units") or {}
             property_data = unit_data.get("properties") or {}
-            
+
             data["tenant_name"] = user_data.get("name")
             data["tenant_phone"] = user_data.get("phone")
             data["rent_amount"] = unit_data.get("rent_amount")
             data["property_name"] = property_data.get("name")
-    
+
     return data
 
 
@@ -298,7 +298,9 @@ def _resolve_landlord_id_for_call_row(call_row: dict) -> str | None:
     landlord_id = call_row.get("landlord_id")
     tenant_id = call_row.get("tenant_id")
     if not landlord_id:
-        landlord_id = _extract_landlord_id_from_initiated_by(call_row.get("initiated_by"))
+        landlord_id = _extract_landlord_id_from_initiated_by(
+            call_row.get("initiated_by")
+        )
 
     if not landlord_id and tenant_id:
         tenancy = (
@@ -315,122 +317,6 @@ def _resolve_landlord_id_for_call_row(call_row: dict) -> str | None:
             landlord_id = prop.get("landlord_id")
 
     return landlord_id
-
-
-class TranscriptCollector:
-    """Collects conversation transcript in JSON format for call logging."""
-
-    def __init__(self):
-        self.parts = []
-        self._finalized_texts = set()  # Track finalized texts to avoid duplicates
-
-    def _is_duplicate(self, text: str) -> bool:
-        """Check if this text was already saved as a finalized entry."""
-        return text in self._finalized_texts
-
-    def _mark_finalized(self, text: str):
-        """Mark text as finalized so we don't add duplicates."""
-        self._finalized_texts.add(text)
-
-    def add_user_speech(self, text: str, is_final: bool = True):
-        # Only save finalized (complete) transcriptions
-        if text and text.strip() and is_final:
-            # Check for duplicates
-            if self._is_duplicate(text.strip()):
-                return
-            self._mark_finalized(text.strip())
-            self.parts.append({
-                "speaker": "user",
-                "text": text.strip(),
-                "is_final": is_final
-            })
-
-    def add_ai_speech(self, text: str, is_final: bool = True):
-        # Only save finalized (complete) transcriptions
-        if text and text.strip() and is_final:
-            # Check for duplicates
-            if self._is_duplicate(text.strip()):
-                return
-            self._mark_finalized(text.strip())
-            self.parts.append({
-                "speaker": "sara",
-                "text": text.strip(),
-                "is_final": is_final
-            })
-
-    def add_interruption(self):
-        self.parts.append({
-            "speaker": "system",
-            "text": "[User interrupted]",
-            "is_final": True
-        })
-
-    def add_error(self, error: str):
-        self.parts.append({
-            "speaker": "system",
-            "text": f"[Error: {error}]",
-            "is_final": True
-        })
-
-    def get_transcript_json(self) -> str:
-        import json
-        return json.dumps(self.parts, ensure_ascii=False, indent=2)
-
-    def get_transcript_text(self) -> str:
-        lines = []
-        for part in self.parts:
-            speaker = part.get("speaker", "unknown")
-            text = part.get("text", "")
-            if speaker == "user":
-                lines.append(f"User: {text}")
-            elif speaker == "sara":
-                lines.append(f"Sara: {text}")
-            else:
-                lines.append(text)
-        return "\n".join(lines)
-
-    def get_transcript(self) -> str:
-        return self.get_transcript_text()
-
-
-def _build_initial_greeting(call_row: dict) -> str:
-    """Build dynamic greeting that asks for language preference."""
-    tenant_name = call_row.get("tenant_name") or "there"
-    tenant_id = call_row.get("tenant_id") or ""
-    rent_amount = call_row.get("rent_amount", "0")
-    property_name = call_row.get("property_name") or ""
-
-    try:
-        amount = float(rent_amount) if rent_amount else 0
-        amount_str = f"Rs. {amount:,.0f}"
-    except (ValueError, TypeError):
-        amount_str = "the rent"
-
-    greeting = f"""Hello {tenant_name}, this is Sara from PropStack calling regarding your outstanding balance of {amount_str}.
-
-Context for this call:
-- Tenant User ID: {tenant_id}
-- Tenant Name: {tenant_name}
-- Property: {property_name or "N/A"}
-- Outstanding Balance: {amount_str}
-
-First, ask: "Would you like to continue in English or Hindi?" (ask in English initially)
-Then proceed in the tenant's chosen language.
-
-If tenant asks questions you don't know, use the tools to find answers. Then respond in tenant's language."""
-
-    return greeting
-
-
-def _voice_run_config() -> RunConfig:
-    """Create RunConfig for human-like voice conversation."""
-    return RunConfig(
-        streaming_mode=StreamingMode.BIDI,
-        response_modalities=["AUDIO"],
-        input_audio_transcription=types.AudioTranscriptionConfig(),
-        output_audio_transcription=types.AudioTranscriptionConfig(),
-        session_resumption=types.SessionResumptionConfig(),
-    )
 
 
 def _form_to_string_dict(form_data) -> dict[str, str]:
@@ -451,21 +337,185 @@ async def chat_stream(
 
     if landlord_id:
         landlord_id = _resolve_landlord_id(landlord_id)
-    
+
     if not landlord_id:
         raise HTTPException(
             status_code=401,
-            detail="Authentication required. Please log in through the app."
+            detail="Authentication required. Please log in through the app.",
         )
-    
+
+    # Pre-compute session_id to return in headers
+    session_id = request.session_id
+
+    # Validate it's a UUID, if not, generate one
+    if not session_id or session_id == "new":
+        session_id = str(uuid.uuid4())
+    else:
+        try:
+            uuid.UUID(session_id)
+        except (ValueError, AttributeError):
+            session_id = str(uuid.uuid4())
+
     return StreamingResponse(
-        _chat_stream(request, landlord_id),
+        _chat_stream(request, landlord_id, session_id),
         media_type="text/plain; charset=utf-8",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
+            "X-Session-ID": session_id,
+            "X-Conversation-ID": session_id,
         },
     )
+
+
+@router.get("/chat/sessions")
+async def get_chat_sessions(
+    x_internal_secret: str = Depends(verify_internal_request),
+    x_landlord_id: str | None = Header(None, alias="x-landlord-id"),
+):
+    """Get chat sessions directly from ADK SessionService."""
+    landlord_id = x_landlord_id
+    if landlord_id:
+        landlord_id = _resolve_landlord_id(landlord_id)
+    if not landlord_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    response = await session_service.list_sessions(
+        app_name="propstack_rent", user_id=landlord_id
+    )
+
+    # Sort by update_time descending
+    sessions = sorted(
+        response.sessions,
+        key=lambda s: getattr(s, "last_update_time", 0.0),
+        reverse=True,
+    )
+
+    results = []
+    # Only fetch full events for the most recent 10 to avoid performance hits
+    for i, s in enumerate(sessions):
+        if s.id == "new":
+            continue
+
+        title = s.state.get("title") if s.state else None
+
+        # Fall back to the first user message for a title
+        if not title and i < 10:
+            full_session = await session_service.get_session(
+                app_name="propstack_rent", user_id=landlord_id, session_id=s.id
+            )
+            if full_session:
+                events = getattr(full_session, "events", [])
+                for event in events:
+                    if getattr(event.content, "role", "model") == "user":
+                        text = "".join(
+                            p.text or ""
+                            for p in event.content.parts
+                            if hasattr(p, "text") and p.text
+                        )
+
+                        import re
+
+                        # Strip injected hidden landlord context instructions
+                        clean_text = re.sub(
+                            r"\n\n\[Context: The authenticated landlord ID.*?\]",
+                            "",
+                            text,
+                            flags=re.DOTALL,
+                        ).strip()
+
+                        if clean_text:
+                            # Take the first ~30 characters as a title
+                            title = clean_text[:30] + (
+                                "..." if len(clean_text) > 30 else ""
+                            )
+                            break
+
+        if not title:
+            title = "AI Assistant"
+
+        results.append(
+            {
+                "id": s.id,
+                "title": title,
+                "status": "active",
+                "last_message_at": datetime.fromtimestamp(
+                    getattr(s, "last_update_time", 0.0), tz=timezone.utc
+                ).isoformat()
+                if getattr(s, "last_update_time", 0.0)
+                else datetime.now(timezone.utc).isoformat(),
+                "created_at": datetime.fromtimestamp(
+                    getattr(s, "last_update_time", 0.0), tz=timezone.utc
+                ).isoformat()
+                if getattr(s, "last_update_time", 0.0)
+                else datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+    return results
+
+
+@router.get("/chat/sessions/{session_id}/history")
+async def get_chat_history(
+    session_id: str,
+    x_internal_secret: str = Depends(verify_internal_request),
+    x_landlord_id: str | None = Header(None, alias="x-landlord-id"),
+):
+    """Get chat history directly from ADK Session events."""
+    landlord_id = x_landlord_id
+    if landlord_id:
+        landlord_id = _resolve_landlord_id(landlord_id)
+    if not landlord_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    session = await session_service.get_session(
+        app_name="propstack_rent", user_id=landlord_id, session_id=session_id
+    )
+    if not session:
+        return []
+
+    messages = []
+    for event in getattr(session, "events", []):
+        if hasattr(event, "content") and event.content and event.content.parts:
+            text = "".join(
+                p.text or ""
+                for p in event.content.parts
+                if hasattr(p, "text") and p.text
+            )
+            if not text:
+                continue
+
+            # In ADK, roles can be 'user' or 'model'
+            role = getattr(event.content, "role", "model")
+            sender_type = "ai" if role == "model" else "landlord"
+
+            # Strip injected landlord context from user prompt
+            if sender_type == "landlord":
+                import re
+
+                text = re.sub(
+                    r"\n\n\[Context: The authenticated landlord ID.*?\]",
+                    "",
+                    text,
+                    flags=re.DOTALL,
+                )
+
+            event_ts = getattr(event, "timestamp", 0.0)
+
+            messages.append(
+                {
+                    "id": getattr(event, "id", str(uuid.uuid4())),
+                    "sender_type": sender_type,
+                    "message_text": text.strip(),
+                    "created_at": datetime.fromtimestamp(
+                        event_ts, tz=timezone.utc
+                    ).isoformat()
+                    if event_ts
+                    else datetime.now(timezone.utc).isoformat(),
+                }
+            )
+
+    return messages
 
 
 @router.post("/check-rent")
@@ -473,10 +523,7 @@ async def check_rent(landlord_id: str) -> dict:
     landlord_id = _resolve_landlord_id(landlord_id)
     result = await _run_agent(
         user_id=landlord_id,
-        prompt=(
-            f"Check which tenants owe rent. "
-            f"My landlord ID is {landlord_id}"
-        ),
+        prompt=(f"Check which tenants owe rent. My landlord ID is {landlord_id}"),
     )
     return {"result": result}
 
@@ -490,7 +537,11 @@ async def initiate_rent_call(body: CallInitiationRequest) -> CallInitiationRespo
         raise HTTPException(status_code=500, detail=tenants_result.get("error_message"))
 
     tenant = next(
-        (t for t in tenants_result.get("tenants", []) if t.get("tenant_id") == body.tenant_id),
+        (
+            t
+            for t in tenants_result.get("tenants", [])
+            if t.get("tenant_id") == body.tenant_id
+        ),
         None,
     )
     if not tenant:
@@ -505,8 +556,12 @@ async def initiate_rent_call(body: CallInitiationRequest) -> CallInitiationRespo
         )
 
     sb = get_supabase()
-    if not call_policy_service.validate_tenant_landlord_ownership(sb, landlord_id, body.tenant_id):
-        raise HTTPException(status_code=403, detail="Tenant does not belong to landlord")
+    if not call_policy_service.validate_tenant_landlord_ownership(
+        sb, landlord_id, body.tenant_id
+    ):
+        raise HTTPException(
+            status_code=403, detail="Tenant does not belong to landlord"
+        )
 
     limits = call_policy_service.get_policy_limits()
     attempts_today = call_policy_service.count_call_attempts_today(
@@ -596,7 +651,9 @@ async def run_rent_sweep(
         tenancy_id = candidate["tenancy_id"]
         landlord_id = candidate["landlord_id"]
 
-        overdue_update = rent_cycle_service.mark_candidate_cycle_overdue(sb, candidate, month)
+        overdue_update = rent_cycle_service.mark_candidate_cycle_overdue(
+            sb, candidate, month
+        )
         if overdue_update["status"] == "error":
             errors += 1
             actions.append(
@@ -605,7 +662,8 @@ async def run_rent_sweep(
                     tenancy_id=tenancy_id,
                     landlord_id=landlord_id,
                     action="error",
-                    reason=overdue_update.get("error_message") or "Failed to mark overdue",
+                    reason=overdue_update.get("error_message")
+                    or "Failed to mark overdue",
                     call_id=None,
                 )
             )
@@ -728,240 +786,6 @@ async def run_rent_sweep(
     )
 
 
-@router.post("/calls/callback", response_model=CallCallbackResponse)
-async def call_callback(
-    body: CallCallbackRequest,
-    x_callback_secret: str = Header("", alias="X-Callback-Secret"),
-) -> CallCallbackResponse:
-    _validate_callback_secret(x_callback_secret)
-
-    callback_result = await save_call_result(
-        call_id=body.call_id,
-        transcript=body.transcript,
-        outcome=body.outcome,
-        duration_seconds=body.duration_seconds,
-        provider_metadata=body.provider_metadata,
-    )
-    if callback_result.get("status") == "error":
-        raise HTTPException(status_code=400, detail=callback_result.get("error_message"))
-
-    call_row = _find_call_log(body.call_id)
-    if not call_row:
-        raise HTTPException(status_code=404, detail="Call log not found")
-
-    landlord_id = _resolve_landlord_id_for_call_row(call_row)
-
-    notification_id = None
-    if landlord_id:
-        notification = await create_notification(
-            user_id=landlord_id,
-            title="Rent Collection Call Completed",
-            message=(
-                f"Call {body.call_id} outcome: {body.outcome}. "
-                f"Duration: {body.duration_seconds}s"
-            ),
-            notification_type="rent_due",
-        )
-        notification_id = (notification.get("data") or {}).get("notification_id")
-
-    return CallCallbackResponse(
-        call_id=body.call_id,
-        status="success",
-        message="Callback saved and landlord notified",
-        notification_id=notification_id,
-    )
-
-
-@router.post("/calls/twilio/status", response_model=TwilioStatusCallbackResponse)
-async def twilio_status_callback(
-    request: Request,
-    call_id: str,
-    x_twilio_signature: str = Header("", alias="X-Twilio-Signature"),
-) -> TwilioStatusCallbackResponse:
-    call_row = _find_call_log(call_id)
-    if not call_row:
-        raise HTTPException(status_code=404, detail="Call log not found")
-
-    form = await request.form()
-    form_payload = _form_to_string_dict(form)
-    is_valid = twilio_voice.validate_signature(
-        url=str(request.url),
-        params=form_payload,
-        signature=x_twilio_signature,
-    )
-    if not is_valid:
-        raise HTTPException(status_code=401, detail="Invalid Twilio signature")
-
-    provider_call_sid = form_payload.get("CallSid")
-    mapped = twilio_voice.map_status(form_payload.get("CallStatus") or "")
-
-    duration_raw = form_payload.get("CallDuration") or "0"
-    try:
-        duration_seconds = int(float(duration_raw))
-    except ValueError:
-        duration_seconds = 0
-
-    transcript = (
-        f"Twilio callback status={mapped['call_status']} sid={provider_call_sid or 'unknown'}"
-    )
-    result = await save_call_result(
-        call_id=call_id,
-        transcript=transcript,
-        outcome=mapped["outcome"],
-        duration_seconds=duration_seconds if mapped["is_terminal"] else 0,
-        provider_metadata={
-            "provider": "twilio_voice",
-            "twilio": form_payload,
-        },
-    )
-    if result.get("status") == "error":
-        raise HTTPException(status_code=400, detail=result.get("error_message"))
-
-    notification_id = None
-    if mapped["is_terminal"]:
-        existing_live = live_session_service.find_by_call_id(call_id)
-        if existing_live:
-            live_session_service.end_session(
-                session_id=existing_live["session_id"],
-                status="ended",
-                metadata={"final_provider_status": mapped["call_status"]},
-            )
-        landlord_id = _resolve_landlord_id_for_call_row(call_row)
-        if landlord_id:
-            notification = await create_notification(
-                user_id=landlord_id,
-                title="Rent Collection Call Status",
-                message=(
-                    f"Call {call_id} finished with {mapped['outcome']} "
-                    f"(provider={mapped['call_status']})."
-                ),
-                notification_type="rent_due",
-            )
-            notification_id = (notification.get("data") or {}).get("notification_id")
-
-    return TwilioStatusCallbackResponse(
-        call_id=call_id,
-        status="success",
-        message="Twilio status callback processed",
-        provider_call_sid=provider_call_sid,
-        provider_status=mapped["call_status"],
-        outcome=mapped["outcome"],
-        is_terminal=bool(mapped["is_terminal"]),
-        notification_id=notification_id,
-    )
-
-
-@router.post("/calls/live/session/start", response_model=LiveSessionStartResponse)
-async def start_live_session(body: LiveSessionStartRequest) -> LiveSessionStartResponse:
-    call_row = _find_call_log(body.call_id)
-    if not call_row:
-        raise HTTPException(status_code=404, detail="Call log not found")
-
-    record = live_session_service.start_session(
-        call_id=body.call_id,
-        source=body.source,
-        provider_call_sid=body.provider_call_sid,
-        metadata=body.metadata,
-    )
-
-    start_result = await save_call_result(
-        call_id=body.call_id,
-        transcript="Live session started",
-        outcome="in_progress",
-        duration_seconds=0,
-        provider_metadata={
-            "provider": "twilio_voice",
-            "live_session_id": record["session_id"],
-            "source": body.source,
-            "metadata": body.metadata or {},
-        },
-    )
-    if start_result.get("status") == "error":
-        raise HTTPException(status_code=400, detail=start_result.get("error_message"))
-
-    return LiveSessionStartResponse(
-        status="success",
-        message="Live session started",
-        call_id=body.call_id,
-        live_session_id=record["session_id"],
-        live_state=record["status"],
-        provider_call_sid=record.get("provider_call_sid"),
-    )
-
-
-@router.post("/calls/live/session/end", response_model=LiveSessionEndResponse)
-async def end_live_session(body: LiveSessionEndRequest) -> LiveSessionEndResponse:
-    if not body.call_id and not body.live_session_id:
-        raise HTTPException(status_code=400, detail="Provide call_id or live_session_id")
-
-    record = None
-    if body.live_session_id:
-        record = live_session_service.get_session(body.live_session_id)
-    if not record and body.call_id:
-        record = live_session_service.find_by_call_id(body.call_id)
-    if not record:
-        raise HTTPException(status_code=404, detail="Live session not found")
-
-    started_at = datetime.fromisoformat(record["started_at"])
-    resolved_duration = body.duration_seconds
-    if resolved_duration is None:
-        resolved_duration = max(
-            int((datetime.now(timezone.utc) - started_at).total_seconds()),
-            0,
-        )
-
-    ended = live_session_service.end_session(
-        session_id=record["session_id"],
-        status="ended",
-        metadata=body.metadata,
-    )
-    if not ended:
-        raise HTTPException(status_code=404, detail="Live session not found")
-
-    call_id = ended["call_id"]
-    transcript = body.transcript or f"Live session ended with outcome={body.outcome}"
-    save_result = await save_call_result(
-        call_id=call_id,
-        transcript=transcript,
-        outcome=body.outcome,
-        duration_seconds=resolved_duration,
-        provider_metadata={
-            "provider": "twilio_voice",
-            "live_session_id": ended["session_id"],
-            "metadata": body.metadata or {},
-        },
-    )
-    if save_result.get("status") == "error":
-        raise HTTPException(status_code=400, detail=save_result.get("error_message"))
-
-    call_row = _find_call_log(call_id)
-    if call_row:
-        landlord_id = _resolve_landlord_id_for_call_row(call_row)
-        if landlord_id:
-            await create_notification(
-                user_id=landlord_id,
-                title="Live Rent Call Ended",
-                message=f"Call {call_id} ended with outcome={body.outcome}.",
-                notification_type="rent_due",
-            )
-
-    return LiveSessionEndResponse(
-        status="success",
-        message="Live session ended",
-        call_id=call_id,
-        live_session_id=ended["session_id"],
-        live_state=ended["status"],
-        outcome=body.outcome,
-        duration_seconds=int(resolved_duration),
-    )
-
-
-@router.post("/calls/twilio/twiml/{call_id}")
-async def twilio_twiml(call_id: str) -> Response:
-    twiml = twilio_voice.build_twiml_bootstrap_response(call_id=call_id)
-    return Response(content=twiml, media_type="application/xml")
-
-
 @router.websocket("/live/browser/{session_id}")
 async def browser_live_stream(websocket: WebSocket, session_id: str) -> None:
     await websocket.accept()
@@ -977,7 +801,9 @@ async def browser_live_stream(websocket: WebSocket, session_id: str) -> None:
 
             message = str(payload.get("message") or "").strip()
             if not message:
-                await websocket.send_json({"type": "error", "message": "message is required"})
+                await websocket.send_json(
+                    {"type": "error", "message": "message is required"}
+                )
                 continue
 
             user_id = str(payload.get("user_id") or "live-browser-user")
@@ -995,182 +821,3 @@ async def browser_live_stream(websocket: WebSocket, session_id: str) -> None:
             await websocket.send_json({"type": "done"})
     except WebSocketDisconnect:
         return
-
-
-@router.websocket("/calls/live/twilio/media/{call_id}")
-async def twilio_media_stream(websocket: WebSocket, call_id: str) -> None:
-    """WebSocket for Twilio media stream with ADK Gemini Live integration."""
-    call_row = _find_call_log(call_id)
-    if not call_row:
-        await websocket.close(code=4404, reason="Call log not found")
-        return
-
-    await websocket.accept()
-
-    record = live_session_service.start_session(
-        call_id=call_id,
-        source="twilio_media_ws",
-        metadata={"transport": "twilio_media_stream"},
-    )
-    live_session_id = record["session_id"]
-    twilio_stream_sid: str | None = None
-    call_start_time: datetime | None = None
-
-    transcript_collector = TranscriptCollector()
-    outbound_audio_task: asyncio.Task[None] | None = None
-    live_queue: LiveRequestQueue | None = None
-
-    if settings.enable_partner_twilio_live:
-        if not twilio_voice.has_audio_transcoding_support():
-            logger.warning("Audio transcoding unavailable. Twilio live disabled.")
-            if not settings.enable_custom_bridge_fallback:
-                await websocket.close(code=1011, reason="Audio transcoding unavailable")
-                return
-
-    async def _send_audio_to_twilio():
-        """Forward Gemini audio to Twilio in real-time."""
-        nonlocal twilio_stream_sid
-        if not live_queue:
-            return
-
-        try:
-            async for event in voice_runner.run_live(
-                user_id=call_id,
-                session_id=live_session_id,
-                live_request_queue=live_queue,
-                run_config=_voice_run_config(),
-            ):
-                # Handle errors first - per ADK docs
-                if event.error_code:
-                    logger.error(f"ADK error call_id={call_id}: {event.error_code} - {event.error_message}")
-                    if event.error_code in ["SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST"]:
-                        transcript_collector.parts.append(f"[Error: {event.error_code}]")
-                        break
-                    continue
-
-                if event.content and event.content.parts:
-                    for part in event.content.parts:
-                        if part.inline_data and twilio_stream_sid:
-                            payload = twilio_voice.pcm16_to_twilio_payload(
-                                part.inline_data.data
-                            )
-                            await websocket.send_text(json.dumps({
-                                "event": "media",
-                                "streamSid": twilio_stream_sid,
-                                "media": {"payload": payload}
-                            }))
-
-                if event.input_transcription:
-                    user_text = event.input_transcription.text
-                    is_finished = getattr(event.input_transcription, 'finished', True)
-                    if user_text and user_text.strip():
-                        transcript_collector.add_user_speech(user_text, is_finished)
-
-                if event.output_transcription:
-                    ai_text = event.output_transcription.text
-                    is_finished = getattr(event.output_transcription, 'finished', True)
-                    if ai_text and ai_text.strip():
-                        transcript_collector.add_ai_speech(ai_text, is_finished)
-
-                if event.interrupted:
-                    logger.info(f"User interrupted - pausing audio call_id={call_id}")
-                    transcript_collector.add_interruption()
-                    continue
-
-                if event.turn_complete:
-                    logger.debug(f"Turn complete call_id={call_id}")
-
-        except Exception as e:
-            logger.exception(f"ADK run_live error call_id={call_id}: {e}")
-
-    try:
-        live_queue = LiveRequestQueue()
-        outbound_audio_task = asyncio.create_task(_send_audio_to_twilio())
-
-        while True:
-            payload = await websocket.receive_text()
-            event = json.loads(payload)
-            event_type = (event.get("event") or "").lower()
-
-            if event_type == "start":
-                start_payload = event.get("start") or {}
-                twilio_stream_sid = start_payload.get("streamSid")
-                provider_call_sid = start_payload.get("callSid")
-                call_start_time = datetime.now(timezone.utc)
-
-                logger.info(
-                    "Twilio stream started call_id=%s stream_sid=%s",
-                    call_id, twilio_stream_sid
-                )
-
-                live_session_service.attach_twilio_stream(
-                    session_id=live_session_id,
-                    twilio_stream_sid=twilio_stream_sid,
-                    provider_call_sid=provider_call_sid,
-                )
-
-                greeting = _build_initial_greeting(call_row)
-                live_queue.send_content(types.Content(
-                    role="user",
-                    parts=[types.Part(text=greeting)]
-                ))
-                continue
-
-            if event_type == "media":
-                media = event.get("media") or {}
-                media_payload = media.get("payload")
-                media_track = (media.get("track") or "").lower()
-
-                if not media_payload or not live_queue:
-                    continue
-                if media_track and media_track != "inbound":
-                    continue
-
-                pcm_chunk = twilio_voice.twilio_payload_to_pcm16(media_payload)
-                audio_blob = types.Blob(
-                    mime_type="audio/pcm;rate=16000",
-                    data=pcm_chunk
-                )
-                live_queue.send_realtime(audio_blob)
-                continue
-
-            if event_type in {"stop", "closed"}:
-                break
-
-    except WebSocketDisconnect:
-        pass
-    except Exception as exc:
-        logger.exception("Twilio media websocket failed call_id=%s", call_id)
-    finally:
-        if outbound_audio_task:
-            outbound_audio_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await outbound_audio_task
-
-        if live_queue:
-            live_queue.close()
-
-        duration_seconds = 0
-        if call_start_time:
-            duration_seconds = int((datetime.now(timezone.utc) - call_start_time).total_seconds())
-
-        final_transcript_json = transcript_collector.get_transcript_json()
-        
-        if final_transcript_json:
-            await save_call_result(
-                call_id=call_id,
-                transcript=final_transcript_json,
-                outcome="completed",
-                duration_seconds=duration_seconds,
-                provider_metadata={
-                    "live_session_id": live_session_id,
-                    "provider": "twilio_voice",
-                    "source": "adk_live",
-                },
-            )
-
-        live_session_service.end_session(
-            session_id=live_session_id,
-            status="ended",
-            metadata={"reason": "socket_closed"},
-        )

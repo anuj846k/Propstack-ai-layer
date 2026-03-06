@@ -1,5 +1,5 @@
 import asyncio
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from app.config import settings
 from app.dependencies import get_supabase
@@ -81,29 +81,30 @@ def _fetch_tenancies(landlord_id: str) -> dict:
             days_overdue = date_based_days_overdue
             is_overdue = days_overdue > 0
 
-        tenants.append({
-            "tenant_id": tenant_user.get("id"),
-            "tenant_name": tenant_user.get("name"),
-            "tenant_phone": tenant_user.get("phone"),
-            "tenant_email": tenant_user.get("email"),
-            "preferred_language": tenant_user.get(
-                "preferred_language", "english"
-            ),
-            "unit_id": unit.get("id"),
-            "unit_number": unit.get("unit_number"),
-            "property_name": prop.get("name"),
-            "property_address": prop.get("address"),
-            "rent_amount": unit.get("rent_amount"),
-            "days_overdue": days_overdue,
-            "is_overdue": is_overdue,
-            "payment_status": cycle.get("status") if cycle else "unpaid",
-        })
+        tenants.append(
+            {
+                "tenant_id": tenant_user.get("id"),
+                "tenant_name": tenant_user.get("name"),
+                "tenant_phone": tenant_user.get("phone"),
+                "tenant_email": tenant_user.get("email"),
+                "preferred_language": tenant_user.get("preferred_language", "english"),
+                "unit_id": unit.get("id"),
+                "unit_number": unit.get("unit_number"),
+                "property_name": prop.get("name"),
+                "property_address": prop.get("address"),
+                "rent_amount": unit.get("rent_amount"),
+                "days_overdue": days_overdue,
+                "is_overdue": is_overdue,
+                "payment_status": cycle.get("status") if cycle else "unpaid",
+            }
+        )
 
     return {
         "status": "success",
         "tenants": tenants,
         "total_count": len(tenants),
         "overdue_count": sum(1 for t in tenants if t["is_overdue"]),
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
     }
 
 
@@ -142,6 +143,7 @@ def _fetch_payment_history(tenant_id: str) -> dict:
             "status": "success",
             "payments": result.data or [],
             "total_payments": len(result.data or []),
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
         }
     except Exception:
         return {"status": "success", "payments": [], "total_payments": 0}
@@ -172,7 +174,7 @@ def _fetch_collection_history(tenant_id: str) -> dict:
         .select("*")
         .eq("tenant_id", tenant_id)
         .order("created_at", desc=True)
-        .limit(5)
+        .limit(20)
         .execute()
     )
     return {
@@ -250,9 +252,7 @@ def _fetch_units_for_landlord(landlord_id: str) -> dict:
         unit_id = unit.get("id")
         prop = unit.get("properties") or {}
         related = tenancies_by_unit.get(unit_id, [])
-        active_tenancy = next(
-            (t for t in related if t.get("status") == "active"), None
-        )
+        active_tenancy = next((t for t in related if t.get("status") == "active"), None)
 
         # Derive occupancy primarily from units.is_occupied, with a fallback to tenancies.
         is_occupied_flag = unit.get("is_occupied")
@@ -293,6 +293,7 @@ def _fetch_units_for_landlord(landlord_id: str) -> dict:
         "total_units": len(units),
         "occupied_units": sum(1 for u in units if u["occupancy_status"] == "occupied"),
         "vacant_units": sum(1 for u in units if u["occupancy_status"] == "vacant"),
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
     }
 
 
