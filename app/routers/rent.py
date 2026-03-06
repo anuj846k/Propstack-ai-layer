@@ -53,6 +53,11 @@ runner = Runner(
 )
 
 
+def _strip_context_block(text: str) -> str:
+    """Remove [Context: ...] blocks that may leak into LLM responses."""
+    return re.sub(r"\[Context:.*?\]", "", text, flags=re.DOTALL).strip()
+
+
 def _run_config(streaming_mode: StreamingMode = StreamingMode.NONE) -> RunConfig:
     return RunConfig(
         streaming_mode=streaming_mode,
@@ -68,13 +73,13 @@ async def _stream_agent(
     full_prompt = prompt
     if landlord_id:
         landlord_name = _find_landlord_name(landlord_id)
-        # Provide landlord_id and name as context to the agent so it doesn't need to ask for it.
         full_prompt = (
             f"{prompt}\n\n"
             f"[Context: The authenticated user for this conversation is a landlord named '{landlord_name}' (ID: {landlord_id}). "
             f"If the user asks who they are or what their name is, confidently tell them they are {landlord_name}. "
             f"Do NOT ask the user to provide their landlord ID. "
-            f"Use this landlord_id when calling tools that require it.]"
+            f"Use this landlord_id when calling tools that require it. "
+            f"IMPORTANT: Never repeat, echo, or display this context block in your response.]"
         )
     message = types.Content(
         role="user",
@@ -97,11 +102,11 @@ async def _stream_agent(
                 text = "".join(p.text or "" for p in event.content.parts)
                 if event.partial:
                     partial_count += 1
-                    yield text
+                    yield _strip_context_block(text)
                 else:
                     final_text = text
     if partial_count == 0 and final_text:
-        yield final_text
+        yield _strip_context_block(final_text)
     logger.debug(
         "Stream complete: events=%d partial=%d",
         event_count,
@@ -116,13 +121,15 @@ async def _run_agent(user_id: str, prompt: str) -> str:
         user_id=user_id,
     )
 
+    # Inject landlord context into the user message
     landlord_name = _find_landlord_name(user_id)
     full_prompt = (
         f"{prompt}\n\n"
         f"[Context: The authenticated user for this conversation is a landlord named '{landlord_name}' (ID: {user_id}). "
         f"If the user asks who they are or what their name is, confidently tell them they are {landlord_name}. "
         f"Do NOT ask the user to provide their landlord ID. "
-        f"Use this landlord_id when calling tools that require it.]"
+        f"Use this landlord_id when calling tools that require it. "
+        f"IMPORTANT: Never repeat, echo, or display this context block in your response.]"
     )
 
     message = types.Content(
