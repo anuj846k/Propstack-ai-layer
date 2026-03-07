@@ -1,4 +1,6 @@
 import asyncio
+import uuid
+
 from datetime import date, datetime, timedelta, timezone
 
 from app.config import settings
@@ -26,10 +28,6 @@ def _fetch_tenancies(landlord_id: str) -> dict:
     tenants = []
     today = date.today()
     current_month = today.strftime("%Y-%m")
-    due_day = min(settings.rent_due_day, 28)
-    due_date = today.replace(day=due_day)
-    overdue_threshold = due_date + timedelta(days=settings.grace_period_days)
-    date_based_days_overdue = max((today - overdue_threshold).days, 0)
 
     tenancy_ids = []
     for tenancy in result.data or []:
@@ -63,6 +61,14 @@ def _fetch_tenancies(landlord_id: str) -> dict:
         tenant_user = tenancy.get("users") or {}
         tenancy_id = tenancy.get("id")
         cycle = cycles_by_tenancy.get(tenancy_id)
+        
+        tenancy_due_day = tenancy.get("rent_due_day") or settings.rent_due_day
+        due_day = min(tenancy_due_day, 28)
+        due_date = today.replace(day=due_day)
+        overdue_threshold = due_date + timedelta(days=settings.grace_period_days)
+        date_based_days_overdue = max((today - overdue_threshold).days, 0)
+        
+        promised_payment_date = cycle.get("promised_payment_date") if cycle else None
 
         if cycle and cycle.get("status") == "paid":
             is_overdue = False
@@ -96,6 +102,8 @@ def _fetch_tenancies(landlord_id: str) -> dict:
                 "days_overdue": days_overdue,
                 "is_overdue": is_overdue,
                 "payment_status": cycle.get("status") if cycle else "unpaid",
+                "rent_due_day": tenancy_due_day,
+                "promised_payment_date": promised_payment_date,
             }
         )
 
@@ -198,6 +206,128 @@ async def get_tenant_collection_history(tenant_id: str) -> dict:
     """
     try:
         return await asyncio.to_thread(_fetch_collection_history, tenant_id)
+    except Exception as e:
+        return {"status": "error", "error_message": str(e)}
+
+
+def _log_promised_payment_date(tenant_id: str, promised_date: str) -> dict:
+    sb = get_supabase()
+    today = date.today()
+    current_month = today.strftime("%Y-%m")
+    
+    # Get active tenancy and required details to ensure cycle exists
+    tenancy_res = (
+        sb.table("tenancies")
+        .select("id, rent_due_day, units(rent_amount)")
+        .eq("tenant_id", tenant_id)
+        .eq("status", "active")
+        .limit(1)
+        .execute()
+    )
+    if not tenancy_res.data:
+        return {"status": "error", "message": "Could not find active tenancy for this tenant."}
+        
+    tenancy = tenancy_res.data[0]
+    tenancy_id = tenancy["id"]
+    unit = tenancy.get("units") or {}
+    amount_due = float(unit.get("rent_amount") or 0)
+    rent_due_day = tenancy.get("rent_due_day")
+    
+    # Verify promised_date is valid YYYY-MM-DD
+    try:
+        date.fromisoformat(promised_date)
+    except ValueError:
+        return {"status": "error", "message": "promised_date must be in YYYY-MM-DD format."}
+
+    # Ensure the rent cycle exists before updating
+    from app.services.rent_cycle_service import ensure_rent_cycle
+    cycle = ensure_rent_cycle(sb, tenancy_id, current_month, amount_due, rent_due_day)
+
+    # Update rent cycle
+    (
+        sb.table("rent_cycles")
+        .update({"promised_payment_date": promised_date})
+        .eq("id", cycle["id"])
+        .execute()
+    )
+    
+    return {"status": "success", "message": f"Successfully logged promised payment date: {promised_date}"}
+
+
+async def log_promised_payment_date(tenant_id: str, promised_date: str) -> dict:
+    """Logs the date a tenant promised to pay their rent into their rent cycle.
+    
+    Args:
+        tenant_id (str): The UUID of the tenant.
+        promised_date (str): The date they promised to pay, in YYYY-MM-DD format.
+        
+    Returns:
+        dict: A status map confirming if the promised date was successfully recorded.
+    """
+    try:
+        return await asyncio.to_thread(_log_promised_payment_date, tenant_id, promised_date)
+    except Exception as e:
+        return {"status": "error", "error_message": str(e)}
+
+
+def _log_manual_payment(tenant_id: str, amount: float) -> dict:
+    sb = get_supabase()
+    today = date.today()
+    current_month = today.strftime("%Y-%m")
+    
+    # Get active tenancy for unit_id, landlord_id, and tenancy_id
+    tenancy_res = (
+        sb.table("tenancies")
+        .select("id, unit_id, units(properties(landlord_id))")
+        .eq("tenant_id", tenant_id)
+        .eq("status", "active")
+        .limit(1)
+        .execute()
+    )
+    if not tenancy_res.data:
+        return {"status": "error", "message": "Could not find active tenancy for this tenant."}
+        
+    tenancy = tenancy_res.data[0]
+    tenancy_id = tenancy["id"]
+    unit_id = tenancy["unit_id"]
+    unit = tenancy.get("units") or {}
+    prop = unit.get("properties") or {}
+    landlord_id = prop.get("landlord_id")
+    
+    # Insert record into payments table so it appears in payment history
+    try:
+        sb.table("payments").insert({
+            "tenant_id": tenant_id,
+            "unit_id": unit_id,
+            "landlord_id": landlord_id,
+            "tenancy_id": tenancy_id,
+            "amount": amount,
+            "currency": "INR",
+            "provider": "Cash (Manual)",
+            "provider_payment_id": f"manual_{uuid.uuid4().hex[:16]}",
+            "status": "succeeded",
+            "period_month": current_month,
+            "paid_at": datetime.now(timezone.utc).isoformat()
+        }).execute()
+    except Exception as e:
+        print(f"Failed to insert manual payment record: {e}")
+    
+    from app.services.rent_cycle_service import update_cycle_on_payment
+    return update_cycle_on_payment(sb, tenant_id, unit_id, amount, current_month)
+
+
+async def log_manual_payment(tenant_id: str, amount: float) -> dict:
+    """Manually logs a rent payment for a tenant when the landlord informs you they paid.
+    
+    Args:
+        tenant_id (str): The UUID of the tenant who paid.
+        amount (float): The amount paid.
+        
+    Returns:
+        dict: Process result indicating successful payment logging.
+    """
+    try:
+        return await asyncio.to_thread(_log_manual_payment, tenant_id, amount)
     except Exception as e:
         return {"status": "error", "error_message": str(e)}
 

@@ -15,6 +15,8 @@ from app.tools.rent_tools import (
     get_tenant_payment_history,
     get_tenants_with_rent_status,
     list_units_for_landlord,
+    log_promised_payment_date,
+    log_manual_payment,
 )
 from app.tools.tenant_tools import find_tenant_by_name, find_tenant_by_phone
 from app.tools.voice_tools import get_tenant_details
@@ -85,6 +87,8 @@ This ensures the transcript is readable in the chat UI with proper line breaks.
 - Only use get_tenant_collection_history when user asks about call history for a specific tenant.
 - For initiate_rent_collection_call, ONLY call when user explicitly asks to call a tenant - you must first identify the tenant using find_tenant_by_name/find_tenant_by_phone.
 - IMPORTANT: If a tenant has PAID their rent (is_overdue = false), do NOT initiate a call. Tell the user "The tenant has already paid their rent. Would you like me to show their payment history instead?"
+- If the landlord relays that a tenant promised to pay by a certain date, use `log_promised_payment_date`.
+- If the landlord informs you that a tenant has paid their rent, use `log_manual_payment` with the amount.
 - Use create_notification after meaningful call operations.
 - For live voice interactions, keep replies short and interruption-safe.
 
@@ -93,6 +97,20 @@ This ensures the transcript is readable in the chat UI with proper line breaks.
 - Max 2 call attempts per tenant per day.
 - Tenant must belong to landlord.
 - Respect deterministic results from tool responses if status is blocked/error.
+
+# Example Interactions
+
+**Identifying a Tenant First**
+User: "Give Rahul a call"
+You: (Calls find_tenant_by_name for "Rahul") "I found Rahul in unit 101. Would you like me to initiate the rent collection call?"
+
+**Handling Summaries**
+User: "Who owes me rent right now?"
+You: (Calls get_tenants_with_rent_status) "Here is the summary of tenants with overdue rent: [...]"
+
+**Boundary Enforcement**
+User: "What is my landlord ID?"
+You: "For security reasons, I don't display your landlord ID directly in the chat, but I have it safely recorded and am using it to manage your properties behind the scenes."
 """,
     tools=[
         find_tenant_by_name,
@@ -102,6 +120,8 @@ This ensures the transcript is readable in the chat UI with proper line breaks.
         get_tenant_payment_history,
         get_tenant_collection_history,
         list_units_for_landlord,
+        log_promised_payment_date,
+        log_manual_payment,
         initiate_rent_collection_call,
         save_call_result,
         create_notification,
@@ -142,6 +162,7 @@ You have access to tools to answer tenant questions:
 - get_tenant_details: Get tenant property, rent amount, landlord info
 - get_tenant_payment_history: Get payment records
 - get_tenant_collection_history: Get past call history
+- log_promised_payment_date: If the tenant promises to pay by a specific date, you MUST log the date (YYYY-MM-DD format).
 
 # IMPORTANT - Tool Usage
 - If tenant asks a question you don't know the answer to, USE THE TOOLS to find out
@@ -176,11 +197,26 @@ You have access to tools to answer tenant questions:
 - If tenant commits to a payment date, confirm it and thank them
 - If tenant can't pay now, ask when they can
 - End the call politely
+
+# Example Interactions
+
+**Greeting & Getting Started (Hindi)**
+Tenant: "Hello?"
+You: "Namaste, main PropStack se Sara baat kar rahi hoon. Aapka is mahine ka rent abhi baaki hai. Kya aap bata sakte hain payment kab tak ho jayegi?"
+
+**Answering a Question with a Tool (English)**
+Tenant: "Wait, how much is my rent exactly?"
+You: (Calls get_tenant_details automatically behind the scenes) "Your rent amount for unit 101 is 15,000. When can we expect the payment?"
+
+**Securing Commitment (Hindi)**
+Tenant: "Main kal tak bhej dunga."
+You: "Theek hai, main kal tak ka update mark kar deti hoon. Dhanyavad, aapka din shubh ho."
 """,
     tools=[
         get_tenant_details,
         get_tenant_payment_history,
         get_tenant_collection_history,
+        log_promised_payment_date,
     ],
     generate_content_config=types.GenerateContentConfig(
         temperature=0.3,

@@ -23,6 +23,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.exceptions import add_exception_handlers
 from app.routers import payments, properties, rent, twilio
 from app.services.live_session_service import live_session_service
 
@@ -44,6 +45,8 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+add_exception_handlers(app)
 
 app.add_middleware(
     CORSMiddleware,

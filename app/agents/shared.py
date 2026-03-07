@@ -8,6 +8,7 @@ from typing import Any
 from app.config import settings
 from app.dependencies import get_supabase
 from app.services import call_policy_service
+from google.genai import types
 
 
 def tool_envelope(
@@ -22,6 +23,22 @@ def tool_envelope(
         "data": data,
         "error_message": error_message,
     }
+
+
+def inject_landlord_context(
+    model_input: types.GenerateContentConfig | None = None,
+    tool_context=None,
+    context=None,
+    **_kwargs,
+) -> None:
+    """
+    Ensure landlord_id is present in the session state for local testing.
+    This injects the demo_landlord_id if none exists (e.g., in adk web).
+    """
+    ctx = tool_context or context
+    if ctx and not ctx.state.get("user:last_landlord_id"):
+        # Fallback to demo ID for local ADK Web testing
+        ctx.state["user:last_landlord_id"] = settings.demo_landlord_id or "demo"
 
 
 def before_tool_guardrail(

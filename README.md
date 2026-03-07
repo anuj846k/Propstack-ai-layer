@@ -124,3 +124,9 @@ FastAPI AI Service (port 8001)
     │
     └── Supabase (PostgreSQL + Auth + Storage)
 ```
+
+
+So the workflow is:
+
+Development testing → PYTHONPATH=. adk web adk_agents --port 8002 (already running ✅)
+Production / frontend → uvicorn app.main:app --port 8001 (already running ✅)

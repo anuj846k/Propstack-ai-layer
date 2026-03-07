@@ -1,6 +1,6 @@
 import asyncio
 from datetime import datetime, timezone
-from typing import Optional
+
 
 from app.dependencies import get_supabase
 
@@ -66,7 +66,7 @@ def _list_units(property_id: str) -> dict:
 
 
 def _add_unit(
-    property_id: str, unit_number: str, rent_amount: float, floor: Optional[int] = None
+    property_id: str, unit_number: str, rent_amount: float
 ) -> dict:
     sb = get_supabase()
     res = (
@@ -76,7 +76,6 @@ def _add_unit(
                 "property_id": property_id,
                 "unit_number": unit_number,
                 "rent_amount": rent_amount,
-                "floor": floor,
             }
         )
         .execute()
@@ -99,6 +98,7 @@ def _add_tenant_and_tenancy(
     start_date: str,
     end_date: str,
     deposit_amount: float,
+    rent_due_day: int,
 ) -> dict:
     sb = get_supabase()
 
@@ -138,6 +138,7 @@ def _add_tenant_and_tenancy(
                 "start_date": start_date,
                 "end_date": end_date,
                 "deposit_amount": deposit_amount,
+                "rent_due_day": rent_due_day,
                 "status": "active",
             }
         )
@@ -196,7 +197,7 @@ async def list_units(property_id: str) -> dict:
 
 
 async def add_unit(
-    property_id: str, unit_number: str, rent_amount: float, floor: Optional[int] = None
+    property_id: str, unit_number: str, rent_amount: float
 ) -> dict:
     """Adds a new unit to a property.
 
@@ -204,11 +205,8 @@ async def add_unit(
         property_id: UUID of the property.
         unit_number: Flat/Unit number (e.g., '301').
         rent_amount: Monthly rent amount in INR.
-        floor: Optional floor number.
     """
-    return await asyncio.to_thread(
-        _add_unit, property_id, unit_number, rent_amount, floor
-    )
+    return await asyncio.to_thread(_add_unit, property_id, unit_number, rent_amount)
 
 
 async def add_tenant_and_tenancy(
@@ -220,6 +218,7 @@ async def add_tenant_and_tenancy(
     start_date: str,
     end_date: str,
     deposit_amount: float,
+    rent_due_day: int,
 ) -> dict:
     """Creates a tenant user and assigns them to an active tenancy for a unit.
 
@@ -232,6 +231,7 @@ async def add_tenant_and_tenancy(
         start_date: Lease start date (YYYY-MM-DD).
         end_date: Lease end date (YYYY-MM-DD).
         deposit_amount: Security deposit amount in INR.
+        rent_due_day: Day of the month the rent is due (1-28).
     """
     return await asyncio.to_thread(
         _add_tenant_and_tenancy,
@@ -243,4 +243,5 @@ async def add_tenant_and_tenancy(
         start_date,
         end_date,
         deposit_amount,
+        rent_due_day,
     )

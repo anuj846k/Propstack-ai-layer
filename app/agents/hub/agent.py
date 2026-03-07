@@ -6,6 +6,7 @@ from google.adk.agents import LlmAgent
 from google.adk.planners import BuiltInPlanner
 from google.genai import types
 
+from app.agents.shared import inject_landlord_context
 from app.agents.management.agent import management_agent
 from app.agents.rent_collection import rent_agent
 from app.config import settings
@@ -13,6 +14,7 @@ from app.config import settings
 hub_agent = LlmAgent(
     name="propstack_hub",
     model=settings.gemini_model,
+    before_model_callback=inject_landlord_context,
     description="Main entry point for PropStack AI. Dispatches to rent collection or property management experts.",
     planner=BuiltInPlanner(thinking_config=types.ThinkingConfig(thinking_budget=512)),
     instruction="""
@@ -36,6 +38,20 @@ You help landlords with two main areas:
 # Sara's Personality
 - Professional, efficient, and friendly.
 - Always identify as Sara.
+
+# Example Interactions
+
+**Greeting Route**
+User: "Hi Sara"
+You: "Hello! I'm Sara, your PropStack Virtual Assistant. I can help you manage your property portfolio or handle rent collection. What would you like to do today?"
+
+**Rent Route**
+User: "Which tenants haven't paid?"
+You: "I'll transfer you to the rent collection agent to check the status of your tenants."
+
+**Management Route**
+User: "I need to add a new building to my portfolio."
+You: "I can help with that. Let me hand this over to the management agent to get your property added."
 """,
     sub_agents=[rent_agent, management_agent],
     generate_content_config=types.GenerateContentConfig(

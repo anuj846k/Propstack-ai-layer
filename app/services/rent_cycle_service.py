@@ -61,6 +61,7 @@ def ensure_rent_cycle(
     tenancy_id: str,
     period_month: str,
     amount_due: float,
+    rent_due_day: int | None = None,
 ) -> dict:
     existing = (
         sb.table("rent_cycles")
@@ -73,7 +74,7 @@ def ensure_rent_cycle(
     if existing.data:
         return existing.data[0]
 
-    timeline = build_rent_timeline(period_month)
+    timeline = build_rent_timeline(period_month, due_day=rent_due_day)
     created = (
         sb.table("rent_cycles")
         .insert(
@@ -102,7 +103,7 @@ def update_cycle_on_payment(
 ) -> dict:
     tenancy_res = (
         sb.table("tenancies")
-        .select("id, units(rent_amount, properties(landlord_id))")
+        .select("id, rent_due_day, units(rent_amount, properties(landlord_id))")
         .eq("tenant_id", tenant_id)
         .eq("unit_id", unit_id)
         .eq("status", "active")
@@ -121,7 +122,8 @@ def update_cycle_on_payment(
     tenancy_id = tenancy["id"]
     unit = tenancy.get("units") or {}
     amount_due = float(unit.get("rent_amount") or amount)
-    cycle = ensure_rent_cycle(sb, tenancy_id, period_month, amount_due)
+    rent_due_day = tenancy.get("rent_due_day")
+    cycle = ensure_rent_cycle(sb, tenancy_id, period_month, amount_due, rent_due_day)
 
     cycle_id = cycle["id"]
     current_paid = float(cycle.get("amount_paid") or 0)
@@ -166,12 +168,11 @@ def list_overdue_candidates(
     as_of_date: date | None = None,
 ) -> list[dict]:
     today = as_of_date or datetime.now(IST).date()
-    default_timeline = build_rent_timeline(period_month)
 
     tenancies_res = (
         sb.table("tenancies")
         .select(
-            "id, tenant_id, unit_id, "
+            "id, tenant_id, unit_id, rent_due_day, "
             "users!tenancies_tenant_id_fkey(id, name, phone, preferred_language), "
             "units(id, unit_number, rent_amount, properties(id, name, landlord_id))"
         )
@@ -226,8 +227,10 @@ def list_overdue_candidates(
         if status == "paid":
             continue
 
-        due_date = _safe_date((cycle or {}).get("due_date"), default_timeline.due_date)
-        grace_date = _safe_date((cycle or {}).get("grace_date"), default_timeline.grace_date)
+        tenancy_due_day = tenancy.get("rent_due_day")
+        timeline = build_rent_timeline(period_month, due_day=tenancy_due_day)
+        due_date = _safe_date((cycle or {}).get("due_date"), timeline.due_date)
+        grace_date = _safe_date((cycle or {}).get("grace_date"), timeline.grace_date)
         is_overdue = today > grace_date
         if not is_overdue:
             continue
@@ -267,7 +270,8 @@ def mark_candidate_cycle_overdue(
     as_of_date: date | None = None,
 ) -> dict:
     today = as_of_date or datetime.now(IST).date()
-    timeline = build_rent_timeline(period_month)
+    tenancy_due_day = candidate.get("rent_due_day") 
+    timeline = build_rent_timeline(period_month, due_day=tenancy_due_day)
     grace_date = _safe_date(candidate.get("grace_date"), timeline.grace_date)
 
     amount_due = float(candidate.get("amount_due") or 0)
@@ -276,7 +280,8 @@ def mark_candidate_cycle_overdue(
     if outstanding <= 0:
         return {"status": "success", "message": "Cycle already settled", "data": None, "error_message": None}
 
-    cycle = ensure_rent_cycle(sb, candidate["tenancy_id"], period_month, amount_due)
+    tenancy_due_day = candidate.get("rent_due_day")
+    cycle = ensure_rent_cycle(sb, candidate["tenancy_id"], period_month, amount_due, tenancy_due_day)
     if today <= grace_date:
         return {"status": "success", "message": "Cycle not overdue yet", "data": cycle, "error_message": None}
 
