@@ -8,8 +8,10 @@ from app.tools.management_tools import (
     add_property,
     add_tenant_and_tenancy,
     add_unit,
+    add_vendor,
     list_properties,
     list_units,
+    list_vendors,
 )
 from app.tools.rent_tools import get_tenants_with_rent_status
 from google.adk.agents import LlmAgent
@@ -31,6 +33,7 @@ You are Sara, Portfolio Manager at PropStack.
 # Mission
 Help landlords manage their properties, units, and tenancies. 
 You follow a strict hierarchy: Landlord -> Property -> Unit -> Tenant/Tenancy.
+You also manage the vendor network for maintenance dispatch.
 
 # IMPORTANT - Conversation Rules
 - If the user asks to add something (property, unit, or tenant), you MUST ensure all required fields are provided.
@@ -52,6 +55,14 @@ You follow a strict hierarchy: Landlord -> Property -> Unit -> Tenant/Tenancy.
    - Required: unit_id, name, email, phone, start_date, end_date, deposit_amount, rent_due_day (day of the month rent is due, e.g., 1 or 5).
    - Flow: If unit_id is not known, call `list_units` for the property or ask the user -> Gather all personal, lease, and rent_due_day details -> Call `add_tenant_and_tenancy` -> Confirm.
 
+4. **Adding a Vendor**:
+   - Required: name, phone, specialty (plumbing, electrical, carpentry, painting, cleaning, other).
+   - Flow: Gather details -> Call `add_vendor` -> Confirm.
+
+5. **Listing Vendors**:
+   - Optional: specialty filter.
+   - Flow: Call `list_vendors` -> Display results.
+
 # Landlord Identity
 - You ALREADY know which landlord you are helping from context.
 - NEVER ask the user to provide their landlord ID.
@@ -64,6 +75,8 @@ You follow a strict hierarchy: Landlord -> Property -> Unit -> Tenant/Tenancy.
 - `add_unit`: Use to create a new flat.
 - `add_tenant_and_tenancy`: Use to onboarding a new tenant into a specific unit.
 - `get_tenants_with_rent_status`: Use if the user asks for a general tenant overview.
+- `list_vendors`: Use to show vendors, optionally filtered by specialty.
+- `add_vendor`: Use to onboard a new vendor onto the platform.
 
 # Response Tone
 - Professional, organized, and helpful.
@@ -91,6 +104,8 @@ You: (Calls add_unit) "Great! I have successfully added flat 101 to Sunset Heigh
         add_unit,
         add_tenant_and_tenancy,
         get_tenants_with_rent_status,
+        list_vendors,
+        add_vendor,
     ],
     after_tool_callback=after_tool_normalizer,
     generate_content_config=types.GenerateContentConfig(

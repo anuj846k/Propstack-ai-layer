@@ -40,6 +40,7 @@ from app.services.live_session_service import live_session_service
 from app.services.session_service import get_session_service
 from app.tools.call_tools import save_call_result
 from app.tools.notification_tools import create_notification
+from app.utils.transcript_collector import TranscriptCollector
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -51,75 +52,6 @@ voice_runner = Runner(
     session_service=voice_session_service,
     auto_create_session=True,
 )
-
-
-class TranscriptCollector:
-    """Collects conversation transcript in JSON format for call logging."""
-
-    def __init__(self):
-        self.parts = []
-        self._finalized_texts = set()  # Track finalized texts to avoid duplicates
-
-    def _is_duplicate(self, text: str) -> bool:
-        """Check if this text was already saved as a finalized entry."""
-        return text in self._finalized_texts
-
-    def _mark_finalized(self, text: str):
-        """Mark text as finalized so we don't add duplicates."""
-        self._finalized_texts.add(text)
-
-    def add_user_speech(self, text: str, is_final: bool = True):
-        # Only save finalized (complete) transcriptions
-        if text and text.strip() and is_final:
-            # Check for duplicates
-            if self._is_duplicate(text.strip()):
-                return
-            self._mark_finalized(text.strip())
-            self.parts.append(
-                {"speaker": "user", "text": text.strip(), "is_final": is_final}
-            )
-
-    def add_ai_speech(self, text: str, is_final: bool = True):
-        # Only save finalized (complete) transcriptions
-        if text and text.strip() and is_final:
-            # Check for duplicates
-            if self._is_duplicate(text.strip()):
-                return
-            self._mark_finalized(text.strip())
-            self.parts.append(
-                {"speaker": "sara", "text": text.strip(), "is_final": is_final}
-            )
-
-    def add_interruption(self):
-        self.parts.append(
-            {"speaker": "system", "text": "[User interrupted]", "is_final": True}
-        )
-
-    def add_error(self, error: str):
-        self.parts.append(
-            {"speaker": "system", "text": f"[Error: {error}]", "is_final": True}
-        )
-
-    def get_transcript_json(self) -> str:
-        import json
-
-        return json.dumps(self.parts, ensure_ascii=False, indent=2)
-
-    def get_transcript_text(self) -> str:
-        lines = []
-        for part in self.parts:
-            speaker = part.get("speaker", "unknown")
-            text = part.get("text", "")
-            if speaker == "user":
-                lines.append(f"User: {text}")
-            elif speaker == "sara":
-                lines.append(f"Sara: {text}")
-            else:
-                lines.append(text)
-        return "\n".join(lines)
-
-    def get_transcript(self) -> str:
-        return self.get_transcript_text()
 
 
 def _build_initial_greeting(call_row: dict) -> str:
@@ -488,6 +420,15 @@ async def twilio_media_stream(websocket: WebSocket, call_id: str) -> None:
                 if event.interrupted:
                     logger.info(f"User interrupted - pausing audio call_id={call_id}")
                     transcript_collector.add_interruption()
+                    if twilio_stream_sid:
+                        await websocket.send_text(
+                            json.dumps(
+                                {
+                                    "event": "clear",
+                                    "streamSid": twilio_stream_sid,
+                                }
+                            )
+                        )
                     continue
 
                 if event.turn_complete:

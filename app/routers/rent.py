@@ -70,6 +70,8 @@ async def _stream_agent(
     user_id: str, session_id: str, prompt: str, landlord_id: str | None
 ):
     """Run the rent collection agent and stream text deltas."""
+    # Inject landlord context into the user message for agent grounding.
+    # This MUST be stripped from any user-facing outputs (streaming + history).
     full_prompt = prompt
     if landlord_id:
         landlord_name = _find_landlord_name(landlord_id)
@@ -121,7 +123,8 @@ async def _run_agent(user_id: str, prompt: str) -> str:
         user_id=user_id,
     )
 
-    # Inject landlord context into the user message
+    # Inject landlord context into the user message for agent grounding.
+    # This MUST be stripped from any user-facing outputs (streaming + history).
     landlord_name = _find_landlord_name(user_id)
     full_prompt = (
         f"{prompt}\n\n"
@@ -492,20 +495,12 @@ async def get_chat_history(
             if not text:
                 continue
 
+            # Never return injected [Context: ...] blocks to clients (for any role).
+            text = _strip_context_block(text)
+
             # In ADK, roles can be 'user' or 'model'
             role = getattr(event.content, "role", "model")
             sender_type = "ai" if role == "model" else "landlord"
-
-            # Strip injected landlord context from user prompt
-            if sender_type == "landlord":
-                import re
-
-                text = re.sub(
-                    r"\n\n\[Context: The authenticated landlord ID.*?\]",
-                    "",
-                    text,
-                    flags=re.DOTALL,
-                )
 
             event_ts = getattr(event, "timestamp", 0.0)
 

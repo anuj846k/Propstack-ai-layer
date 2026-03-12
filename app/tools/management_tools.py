@@ -158,6 +158,46 @@ def _add_tenant_and_tenancy(
     return {"status": "error", "message": "Failed to create tenancy record"}
 
 
+def _list_vendors(specialty: str = "") -> dict:
+    sb = get_supabase()
+    query = sb.table("vendors").select("id, name, phone, specialty, is_active, landlord_id")
+    if specialty:
+        query = query.eq("specialty", specialty)
+    result = query.eq("is_active", True).order("name").execute()
+    return {
+        "status": "success",
+        "vendors": result.data or [],
+        "count": len(result.data or []),
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def _add_vendor(
+    landlord_id: str, name: str, phone: str, specialty: str
+) -> dict:
+    sb = get_supabase()
+    res = (
+        sb.table("vendors")
+        .insert(
+            {
+                "landlord_id": landlord_id,
+                "name": name,
+                "phone": phone,
+                "specialty": specialty,
+                "is_active": True,
+            }
+        )
+        .execute()
+    )
+    if res.data:
+        return {
+            "status": "success",
+            "message": f"Successfully onboarded vendor: {name} ({specialty})",
+            "vendor": res.data[0],
+        }
+    return {"status": "error", "message": "Failed to add vendor"}
+
+
 # Public Tool Wrappers (Async)
 
 
@@ -245,3 +285,26 @@ async def add_tenant_and_tenancy(
         deposit_amount,
         rent_due_day,
     )
+
+
+async def list_vendors(specialty: str = "") -> dict:
+    """Lists all active vendors on the platform, optionally filtered by specialty.
+
+    Args:
+        specialty: Optional filter (e.g., 'plumbing', 'electrical', 'carpentry', 'painting', 'cleaning', 'other'). Leave empty to list all.
+    """
+    return await asyncio.to_thread(_list_vendors, specialty)
+
+
+async def add_vendor(
+    landlord_id: str, name: str, phone: str, specialty: str
+) -> dict:
+    """Onboards a new vendor onto the platform.
+
+    Args:
+        landlord_id: UUID of the landlord who is onboarding this vendor.
+        name: Full name of the vendor or company.
+        phone: Phone number (starting with +91).
+        specialty: Their area of work — one of: 'plumbing', 'electrical', 'carpentry', 'painting', 'cleaning', 'other'.
+    """
+    return await asyncio.to_thread(_add_vendor, landlord_id, name, phone, specialty)

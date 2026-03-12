@@ -74,13 +74,19 @@ def twilio_media_stream_url(call_id: str) -> str:
     return f"{_ws_base_url()}/api/v1/calls/live/twilio/media/{call_id}"
 
 
-def create_outbound_call(*, to_number: str, call_id: str) -> dict:
+def create_outbound_call(
+    *,
+    to_number: str,
+    call_id: str,
+    twiml_url_override: str | None = None,
+    status_callback_override: str | None = None,
+) -> dict:
     call = get_client().calls.create(
         to=to_number,
         from_=settings.twilio_voice_from_number,
-        url=twiml_url(call_id),
+        url=twiml_url_override or twiml_url(call_id),
         method="POST",
-        status_callback=status_callback_url(call_id),
+        status_callback=status_callback_override or status_callback_url(call_id),
         status_callback_method="POST",
         status_callback_event=["initiated", "ringing", "answered", "completed"],
         timeout=settings.twilio_call_timeout_seconds,
