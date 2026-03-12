@@ -32,6 +32,7 @@ from app.routers import (
     maintenance,
     maintenance_twilio,
     maintenance_tickets,
+    analytics,
 )
 from app.services.live_session_service import live_session_service
 
@@ -74,6 +75,7 @@ app.include_router(properties.router, prefix="/api/v1", tags=["properties"])
 app.include_router(maintenance.router, prefix="/api/v1/maintenance", tags=["maintenance"])
 app.include_router(maintenance_twilio.router, prefix="/api/v1", tags=["maintenance_twilio"])
 app.include_router(maintenance_tickets.router, prefix="/api/v1", tags=["maintenance_tickets"])
+app.include_router(analytics.router, prefix="/api/v1/analytics", tags=["analytics"])
 
 
 @app.get("/health")

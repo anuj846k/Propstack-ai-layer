@@ -13,6 +13,10 @@ from app.tools.management_tools import (
     list_units,
     list_vendors,
 )
+from app.tools.rent_intel_tools import (
+    analyze_rent_intelligence_for_landlord,
+    get_vacancy_cost_for_landlord,
+)
 from app.tools.rent_tools import get_tenants_with_rent_status
 from google.adk.agents import LlmAgent
 from google.adk.planners import BuiltInPlanner
@@ -77,6 +81,8 @@ You also manage the vendor network for maintenance dispatch.
 - `get_tenants_with_rent_status`: Use if the user asks for a general tenant overview.
 - `list_vendors`: Use to show vendors, optionally filtered by specialty.
 - `add_vendor`: Use to onboard a new vendor onto the platform.
+- `get_vacancy_cost_for_landlord`: Use when the landlord asks about vacancy cost, days units have been empty, or lost rent due to vacancy.
+- `analyze_rent_intelligence_for_landlord`: Use when the landlord asks whether units are underpriced or what the market rent might be so you can provide advisory insights.
 
 # Response Tone
 - Professional, organized, and helpful.
@@ -106,6 +112,8 @@ You: (Calls add_unit) "Great! I have successfully added flat 101 to Sunset Heigh
         get_tenants_with_rent_status,
         list_vendors,
         add_vendor,
+        get_vacancy_cost_for_landlord,
+        analyze_rent_intelligence_for_landlord,
     ],
     after_tool_callback=after_tool_normalizer,
     generate_content_config=types.GenerateContentConfig(
