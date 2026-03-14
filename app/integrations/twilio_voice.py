@@ -80,8 +80,9 @@ def create_outbound_call(
     call_id: str,
     twiml_url_override: str | None = None,
     status_callback_override: str | None = None,
+    enable_recording: bool = True,
 ) -> dict:
-    call = get_client().calls.create(
+    call_params = dict(
         to=to_number,
         from_=settings.twilio_voice_from_number,
         url=twiml_url_override or twiml_url(call_id),
@@ -91,6 +92,17 @@ def create_outbound_call(
         status_callback_event=["initiated", "ringing", "answered", "completed"],
         timeout=settings.twilio_call_timeout_seconds,
     )
+
+    # Enable recording and transcription for all calls
+    if enable_recording:
+        call_params.update(
+            {
+                "record": "record-from-ringing-dual",
+                "transcription_callback_url": f"{_base_url()}/api/v1/calls/twilio/transcription?call_id={call_id}",
+            }
+        )
+
+    call = get_client().calls.create(**call_params)
     return {
         "provider_call_sid": call.sid,
         "provider_status": call.status,
@@ -137,9 +149,38 @@ def build_twiml_bootstrap_response(*, call_id: str) -> str:
         ) from _TWILIO_IMPORT_ERROR
 
     response = VoiceResponse()
-    connect = response.connect()
-    # Bidirectional <Connect><Stream> supports inbound track only.
-    connect.stream(url=twilio_media_stream_url(call_id), track="inbound_track")
+
+    # Check if ADK Live is enabled
+    if settings.enable_partner_twilio_live:
+        connect = response.connect()
+        # Bidirectional <Connect><Stream> supports inbound track only.
+        connect.stream(url=twilio_media_stream_url(call_id), track="inbound_track")
+    else:
+        # Fallback: simple greeting and record for transcription
+        response.say(
+            "Hello, this is a call from PropStack. Please hold while we connect you."
+        )
+        response.record(action="/api/v1/calls/twilio/recording-complete", method="POST")
+
+    return str(response)
+
+
+def build_simple_twiml_response(*, call_id: str) -> str:
+    """Build a simple TwiML response that works without ADK Live - records the call."""
+    if _TWILIO_IMPORT_ERROR is not None:
+        raise RuntimeError(
+            "twilio SDK is not installed. Run `uv sync` to install project dependencies."
+        ) from _TWILIO_IMPORT_ERROR
+
+    response = VoiceResponse()
+    # Simple approach: just record the call for transcription
+    response.say("Hello, this is PropStack calling regarding your rent. Please hold.")
+    response.record(
+        action="/api/v1/calls/twilio/recording-complete",
+        method="POST",
+        max_length=300,  # 5 minutes max
+        play_beep=True,
+    )
     return str(response)
 
 

@@ -20,6 +20,7 @@ from google.genai import types
 
 from app.agents import voice_agent
 from app.config import settings
+from app.dependencies import get_supabase
 from app.integrations import twilio_voice
 from app.routers.rent import (
     _find_call_log,
@@ -140,6 +141,108 @@ async def call_callback(
     )
 
 
+@router.post("/calls/twilio/transcription")
+async def twilio_transcription_callback(
+    request: Request,
+) -> Response:
+    """Handle Twilio's transcription callback - save transcript to call_logs."""
+    form = await request.form()
+    form_data = _form_to_string_dict(form)
+
+    # Twilio sends CallSid (provider_call_sid), not our internal call_id
+    call_sid = form_data.get("CallSid", "")
+    transcription_text = form_data.get("TranscriptionText", "")
+    transcription_status = form_data.get("TranscriptionStatus", "")
+
+    logger.info(
+        f"Received transcription for call {call_sid}: status={transcription_status}"
+    )
+
+    # Only save if transcription is complete
+    if transcription_status == "completed" and transcription_text and call_sid:
+        sb = get_supabase()
+        # Find the call by provider_call_sid in metadata or use call_id from query
+        result = sb.table("call_logs").select("id").execute()
+
+        # Try to find by matching the call_sid in summary or metadata
+        # For now, use the call_id from query param if provided
+        call_id = request.query_params.get("call_id")
+
+        if call_id:
+            sb.table("call_logs").update({"transcript": transcription_text}).eq(
+                "id", call_id
+            ).execute()
+            logger.info(f"Saved transcription for call {call_id}")
+        else:
+            logger.warning(
+                f"No call_id found for transcription callback with CallSid {call_sid}"
+            )
+
+    return Response(content="OK", media_type="text/plain")
+
+
+def _find_call_id_by_provider_sid(call_sid: str) -> str | None:
+    """Resolve internal call_logs.id from Twilio CallSid using provider_metadata."""
+    if not call_sid:
+        return None
+    sb = get_supabase()
+    # Status callback stores Twilio payload in provider_metadata.twilio; fetch recent rows
+    result = (
+        sb.table("call_logs")
+        .select("id, provider_metadata")
+        .order("created_at", desc=True)
+        .limit(200)
+        .execute()
+    )
+    for row in (result.data or []):
+        meta = row.get("provider_metadata") or {}
+        twilio_payload = meta.get("twilio") if isinstance(meta.get("twilio"), dict) else {}
+        if twilio_payload.get("CallSid") == call_sid:
+            return row.get("id")
+    return None
+
+
+@router.post("/calls/twilio/recording-complete")
+async def twilio_recording_complete(
+    request: Request,
+) -> Response:
+    """Handle Twilio's recording completion - for fallback recording when ADK Live not used."""
+    form = await request.form()
+    form_data = _form_to_string_dict(form)
+
+    call_sid = form_data.get("CallSid", "")
+    recording_url = form_data.get("RecordingUrl", "")
+    recording_duration = form_data.get("RecordingDuration", "0")
+
+    logger.info(
+        "Recording complete for call %s: duration=%ss, url=%s",
+        call_sid,
+        recording_duration,
+        recording_url,
+    )
+
+    if call_sid:
+        call_id = _find_call_id_by_provider_sid(call_sid)
+        if call_id:
+            sb = get_supabase()
+            sb.table("call_logs").update(
+                {
+                    "summary": f"Recording available: {recording_url}",
+                    "duration_seconds": (
+                        int(recording_duration) if recording_duration.isdigit() else 0
+                    ),
+                }
+            ).eq("id", call_id).execute()
+            logger.info("Updated call_logs %s with recording info", call_id)
+        else:
+            logger.warning(
+                "No call_log found for Twilio CallSid %s; recording not persisted",
+                call_sid,
+            )
+
+    return Response(content="OK", media_type="text/plain")
+
+
 @router.post("/calls/twilio/status", response_model=TwilioStatusCallbackResponse)
 async def twilio_status_callback(
     request: Request,
@@ -169,17 +272,31 @@ async def twilio_status_callback(
     except ValueError:
         duration_seconds = 0
 
-    transcript = f"Twilio callback status={mapped['call_status']} sid={provider_call_sid or 'unknown'}"
-    result = await save_call_result(
-        call_id=call_id,
-        transcript=transcript,
-        outcome=mapped["outcome"],
-        duration_seconds=duration_seconds if mapped["is_terminal"] else 0,
-        provider_metadata={
+    sb = get_supabase()
+    # Check if there's already a transcript from ADK Live session
+    existing = (
+        sb.table("call_logs").select("transcript").eq("id", call_id).limit(1).execute()
+    )
+    has_existing_transcript = existing.data and existing.data[0].get("transcript")
+
+    # Only use status message as transcript if no real transcript exists
+    if has_existing_transcript:
+        transcript = None  # Don't overwrite - ADK Live will save the real transcript
+    else:
+        transcript = f"Twilio callback status={mapped['call_status']} sid={provider_call_sid or 'unknown'}"
+
+    update_payload = {
+        "outcome": mapped["outcome"],
+        "duration_seconds": duration_seconds if mapped["is_terminal"] else 0,
+        "provider_metadata": {
             "provider": "twilio_voice",
             "twilio": form_payload,
         },
-    )
+    }
+    if transcript:
+        update_payload["transcript"] = transcript
+
+    result = sb.table("call_logs").update(update_payload).eq("id", call_id).execute()
     if result.get("status") == "error":
         raise HTTPException(status_code=400, detail=result.get("error_message"))
 

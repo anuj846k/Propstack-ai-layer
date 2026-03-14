@@ -48,10 +48,6 @@ def _insert_call_log(
     property_name: str,
     unit_number: str,
 ) -> str | None:
-    summary = (
-        f"Rent collection call for Rs.{rent_amount}, {days_overdue} days overdue "
-        f"at {property_name} {unit_number}. Provider: twilio_voice."
-    )
     call_log = (
         sb.table("call_logs")
         .insert(
@@ -60,7 +56,6 @@ def _insert_call_log(
                 "landlord_id": landlord_id,
                 "initiated_by": "agent",
                 "language_used": language,
-                "summary": summary,
                 "outcome": "initiated",
             }
         )
@@ -323,3 +318,129 @@ async def save_call_result(
             message="Failed to save call result",
             error_message=str(exc),
         )
+
+
+async def save_call_result_from_agent(
+    call_id: str,
+    transcript: str,
+    outcome: str,
+    duration_seconds: int,
+) -> dict:
+    """Persist call outcome for a previously created call log (agent-facing; no provider_metadata).
+
+    Use this when the LLM needs to save a call result. Backend code (Twilio, live session)
+    should call save_call_result() directly with provider_metadata.
+    """
+    return await save_call_result(
+        call_id=call_id,
+        transcript=transcript,
+        outcome=outcome,
+        duration_seconds=duration_seconds,
+        provider_metadata=None,
+    )
+
+
+ONGOING_OUTCOMES = frozenset({"initiated", "ringing", "in_progress", "queued"})
+
+
+def _get_call_status_sync(
+    landlord_id: str,
+    tenant_id: str | None,
+    call_id: str | None,
+) -> dict:
+    sb = get_supabase()
+    if call_id and call_id.strip():
+        row = (
+            sb.table("call_logs")
+            .select("*")
+            .eq("id", call_id.strip())
+            .eq("landlord_id", landlord_id)
+            .limit(1)
+            .execute()
+        )
+        calls = row.data or []
+    elif tenant_id and tenant_id.strip():
+        row = (
+            sb.table("call_logs")
+            .select("*")
+            .eq("tenant_id", tenant_id.strip())
+            .eq("landlord_id", landlord_id)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        calls = row.data or []
+    else:
+        return {
+            "status": "error",
+            "message": "Provide either tenant_id (to check latest call for that tenant) or call_id (to check a specific call).",
+            "call": None,
+            "is_ongoing": False,
+        }
+
+    if not calls:
+        return {
+            "status": "success",
+            "message": "No matching call found.",
+            "call": None,
+            "is_ongoing": False,
+        }
+
+    c = calls[0]
+    outcome = (c.get("outcome") or "").strip().lower()
+    is_ongoing = outcome in ONGOING_OUTCOMES
+
+    tenant_name = "Tenant"
+    tid = c.get("tenant_id")
+    if tid:
+        u = sb.table("users").select("name").eq("id", tid).limit(1).execute()
+        if u.data:
+            tenant_name = (u.data[0].get("name") or "Tenant").strip()
+
+    return {
+        "status": "success",
+        "message": "Call found.",
+        "call": {
+            "call_id": c.get("id"),
+            "tenant_id": tid,
+            "tenant_name": tenant_name,
+            "outcome": outcome or "unknown",
+            "is_ongoing": is_ongoing,
+            "summary": c.get("summary"),
+            "created_at": str(c["created_at"]) if c.get("created_at") is not None else None,
+            "duration_seconds": c.get("duration_seconds"),
+            "ai_summary": c.get("ai_summary"),
+        },
+        "is_ongoing": is_ongoing,
+    }
+
+
+async def get_call_status(
+    landlord_id: str,
+    tenant_id: str = "",
+    call_id: str = "",
+) -> dict:
+    """Check the current status of a rent collection call.
+
+    Use this when the landlord asks for an update on a call (e.g. "How's the call going?",
+    "Any update on the call to Anuj Kumar?", "Has the call finished?"). Pass the tenant_id
+    if they refer to a tenant by name (use find_tenant_by_name first to get tenant_id), or
+    pass call_id if you have the specific call id from context.
+
+    Args:
+        landlord_id: UUID of the landlord (from context).
+        tenant_id: Optional. UUID of the tenant — returns the latest call for this tenant.
+        call_id: Optional. UUID of the call — returns status for this specific call.
+        Exactly one of tenant_id or call_id should be provided.
+
+    Returns:
+        dict: status, message, call (with call_id, tenant_name, outcome, is_ongoing, summary,
+        created_at, duration_seconds), and is_ongoing. If is_ongoing is true, the call is
+        still in progress (ringing, in progress, etc.). If false, the call has ended.
+    """
+    return await asyncio.to_thread(
+        _get_call_status_sync,
+        landlord_id,
+        tenant_id.strip() or None,
+        call_id.strip() or None,
+    )

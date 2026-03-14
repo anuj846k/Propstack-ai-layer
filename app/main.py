@@ -25,6 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.exceptions import add_exception_handlers
 from app.routers import (
+    calls,
     payments,
     properties,
     rent,
@@ -72,6 +73,7 @@ app.include_router(rent.router, prefix="/api/v1", tags=["rent"])
 app.include_router(twilio.router, prefix="/api/v1", tags=["twilio"])
 app.include_router(payments.router, prefix="/api/v1/payments", tags=["payments"])
 app.include_router(properties.router, prefix="/api/v1", tags=["properties"])
+app.include_router(calls.router, prefix="/api/v1", tags=["calls"])
 app.include_router(maintenance.router, prefix="/api/v1/maintenance", tags=["maintenance"])
 app.include_router(maintenance_twilio.router, prefix="/api/v1", tags=["maintenance_twilio"])
 app.include_router(maintenance_tickets.router, prefix="/api/v1", tags=["maintenance_tickets"])

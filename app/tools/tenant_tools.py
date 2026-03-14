@@ -180,4 +180,77 @@ async def find_tenant_by_phone(phone: str, landlord_id: str) -> dict:
                 "fetched_at": datetime.now(timezone.utc).isoformat(),
             }
 
-    return {"status": "not_found", "message": "No tenant found with that phone number"}
+    return {
+        "status": "not_found",
+        "message": "No tenant found with that phone number",
+    }
+
+
+def update_tenant_details(
+    tenant_id: str,
+    name: str | None = None,
+    phone: str | None = None,
+    email: str | None = None,
+    preferred_language: str | None = None,
+) -> dict:
+    """
+    Update core tenant details in the `users` table.
+
+    This is used when the landlord provides corrected or updated tenant
+    information such as name, phone number, email, or preferred language.
+
+    Args:
+        tenant_id: The Supabase user ID of the tenant to update.
+        name: Optional new full name for the tenant.
+        phone: Optional new phone number (ideally E.164, e.g. "+919876543210").
+        email: Optional new email address.
+        preferred_language: Optional new preferred language code or label.
+
+    Returns:
+        dict with:
+        - status: "success" or "error"
+        - message: Human-readable summary
+        - tenant: Updated tenant row when successful
+    """
+    sb = get_supabase()
+
+    update_data: dict = {}
+    if name is not None:
+        update_data["name"] = name.strip()
+    if phone is not None:
+        update_data["phone"] = phone.strip()
+    if email is not None:
+        update_data["email"] = email.strip()
+    if preferred_language is not None:
+        update_data["preferred_language"] = preferred_language.strip()
+
+    if not update_data:
+        return {
+            "status": "error",
+            "message": "At least one field (name, phone, email, preferred_language) must be provided.",
+        }
+
+    try:
+        result = (
+            sb.table("users")
+            .update(update_data)
+            .eq("id", tenant_id)
+            .execute()
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        return {
+            "status": "error",
+            "message": f"Failed to update tenant details: {exc}",
+        }
+
+    if not result.data:
+        return {
+            "status": "error",
+            "message": "No tenant record was updated. Please confirm the tenant_id.",
+        }
+
+    return {
+        "status": "success",
+        "message": "Tenant details updated successfully.",
+        "tenant": result.data[0],
+    }

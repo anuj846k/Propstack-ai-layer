@@ -38,9 +38,6 @@ class Settings(BaseSettings):
     supabase_pooler_port: int = 5432
     supabase_jwt_secret: str = ""
     google_api_key: str = ""
-    google_genai_use_vertexai: bool = False
-    google_cloud_project: str = ""
-    google_cloud_location: str = "global"
     gemini_model: str = "gemini-2.5-flash"
     gemini_live_model: str = "gemini-live-2.5-flash-native-audio"
     gemini_live_location: str = "us-central1"

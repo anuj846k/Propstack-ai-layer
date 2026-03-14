@@ -26,10 +26,7 @@ def get_landlord_id_from_request(
     The x-landlord-id header is set by Next.js after JWT verification.
     """
     if not x_landlord_id:
-        raise HTTPException(
-            status_code=400,
-            detail="Missing x-landlord-id header"
-        )
+        raise HTTPException(status_code=400, detail="Missing x-landlord-id header")
     return x_landlord_id
 
 
@@ -111,6 +108,7 @@ class CallInitiationResponse(BaseModel):
     status: str
     message: str
     provider_status: str | None
+    error_message: str | None = None
 
 
 def _resolve_landlord_id(landlord_id: str) -> str:
@@ -120,20 +118,16 @@ def _resolve_landlord_id(landlord_id: str) -> str:
 
 def _find_landlord_name(landlord_id: str) -> str:
     sb = get_supabase()
-    result = (
-        sb.table("users")
-        .select("name")
-        .eq("id", landlord_id)
-        .limit(1)
-        .execute()
-    )
+    result = sb.table("users").select("name").eq("id", landlord_id).limit(1).execute()
     if result.data:
         return result.data[0].get("name") or "Landlord"
     return "Landlord"
 
 
 @router.get("/properties", response_model=list[PropertyResponse])
-async def list_properties(landlord_id: str = Depends(get_landlord_id_from_request)) -> list[PropertyResponse]:
+async def list_properties(
+    landlord_id: str = Depends(get_landlord_id_from_request),
+) -> list[PropertyResponse]:
     """List all properties for the authenticated landlord with unit counts."""
     landlord_id = _resolve_landlord_id(landlord_id)
     sb = get_supabase()
@@ -162,14 +156,16 @@ async def list_properties(landlord_id: str = Depends(get_landlord_id_from_reques
         occupied = sum(1 for u in units_res.data or [] if u.get("is_occupied"))
         vacant = total - occupied
 
-        properties.append(PropertyResponse(
-            id=prop_id,
-            name=prop.get("name") or "Unnamed",
-            address=prop.get("address"),
-            total_units=total,
-            occupied_units=occupied,
-            vacant_units=vacant,
-        ))
+        properties.append(
+            PropertyResponse(
+                id=prop_id,
+                name=prop.get("name") or "Unnamed",
+                address=prop.get("address"),
+                total_units=total,
+                occupied_units=occupied,
+                vacant_units=vacant,
+            )
+        )
 
     return properties
 
@@ -208,7 +204,9 @@ async def list_property_units(
     if unit_ids:
         tenancies_res = (
             sb.table("tenancies")
-            .select("id, status, unit_id, tenant_id, users!tenancies_tenant_id_fkey(name)")
+            .select(
+                "id, status, unit_id, tenant_id, users!tenancies_tenant_id_fkey(name)"
+            )
             .in_("unit_id", unit_ids)
             .eq("status", "active")
             .execute()
@@ -224,21 +222,25 @@ async def list_property_units(
         tenancy = tenancies_by_unit.get(unit_id)
         tenant_user = tenancy.get("users") or {} if tenancy else {}
 
-        units.append(UnitResponse(
-            id=unit_id,
-            unit_number=unit.get("unit_number") or "",
-            rent_amount=unit.get("rent_amount") or 0,
-            occupancy_status="occupied" if unit.get("is_occupied") else "vacant",
-            tenant_id=tenancy.get("tenant_id") if tenancy else None,
-            tenant_name=tenant_user.get("name"),
-            tenancy_status=tenancy.get("status") if tenancy else None,
-        ))
+        units.append(
+            UnitResponse(
+                id=unit_id,
+                unit_number=unit.get("unit_number") or "",
+                rent_amount=unit.get("rent_amount") or 0,
+                occupancy_status="occupied" if unit.get("is_occupied") else "vacant",
+                tenant_id=tenancy.get("tenant_id") if tenancy else None,
+                tenant_name=tenant_user.get("name"),
+                tenancy_status=tenancy.get("status") if tenancy else None,
+            )
+        )
 
     return units
 
 
 @router.get("/tenants", response_model=list[TenantListItem])
-async def list_tenants(landlord_id: str = Depends(get_landlord_id_from_request)) -> list[TenantListItem]:
+async def list_tenants(
+    landlord_id: str = Depends(get_landlord_id_from_request),
+) -> list[TenantListItem]:
     """List all tenants for the authenticated landlord with their rent status."""
     landlord_id = _resolve_landlord_id(landlord_id)
 
@@ -278,34 +280,42 @@ async def get_tenant_detail(
     # First verify tenant belongs to this landlord
     tenancy_check = (
         sb.table("tenancies")
-        .select("id, units!tenancies_unit_id_fkey(properties!units_property_id_fkey(landlord_id))")
+        .select(
+            "id, units!tenancies_unit_id_fkey(properties!units_property_id_fkey(landlord_id))"
+        )
         .eq("tenant_id", tenant_id)
         .eq("status", "active")
         .limit(1)
         .execute()
     )
-    
+
     if not tenancy_check.data:
-        raise HTTPException(status_code=404, detail="Tenant not found or no active tenancy")
-    
+        raise HTTPException(
+            status_code=404, detail="Tenant not found or no active tenancy"
+        )
+
     # Verify landlord owns this tenant
     tenancy = tenancy_check.data[0]
     unit_data = tenancy.get("units") or {}
     prop_data = unit_data.get("properties") or {}
-    
+
     if prop_data.get("landlord_id") != landlord_id:
-        raise HTTPException(status_code=403, detail="Not authorized to view this tenant")
+        raise HTTPException(
+            status_code=403, detail="Not authorized to view this tenant"
+        )
 
     tenancy_res = (
         sb.table("tenancies")
-        .select("""
+        .select(
+            """
             id,
             users!tenancies_tenant_id_fkey(id, name, phone, email, preferred_language),
             units!tenancies_unit_id_fkey(
                 id, unit_number, rent_amount,
                 properties!units_property_id_fkey(id, name, address)
             )
-        """)
+        """
+        )
         .eq("tenant_id", tenant_id)
         .eq("status", "active")
         .limit(1)
@@ -313,7 +323,9 @@ async def get_tenant_detail(
     )
 
     if not tenancy_res.data:
-        raise HTTPException(status_code=404, detail="Tenant not found or no active tenancy")
+        raise HTTPException(
+            status_code=404, detail="Tenant not found or no active tenancy"
+        )
 
     tenancy = tenancy_res.data[0]
     user_data = tenancy.get("users") or {}
@@ -327,6 +339,7 @@ async def get_tenant_detail(
 
     from datetime import date, timedelta
     from app.config import settings
+
     today = date.today()
     due_day = min(settings.rent_due_day, 28)
     due_date = today.replace(day=due_day)
@@ -368,30 +381,34 @@ async def get_tenant_calls(
 ) -> PaginatedCallHistoryResponse:
     """Get call history for a specific tenant (must belong to authenticated landlord)."""
     landlord_id = _resolve_landlord_id(landlord_id)
-    
+
     # Verify tenant belongs to landlord
     sb = get_supabase()
     tenancy_check = (
         sb.table("tenancies")
-        .select("id, units!tenancies_unit_id_fkey(properties!units_property_id_fkey(landlord_id))")
+        .select(
+            "id, units!tenancies_unit_id_fkey(properties!units_property_id_fkey(landlord_id))"
+        )
         .eq("tenant_id", tenant_id)
         .eq("status", "active")
         .limit(1)
         .execute()
     )
-    
+
     if not tenancy_check.data:
         raise HTTPException(status_code=404, detail="Tenant not found")
-    
+
     tenancy = tenancy_check.data[0]
     unit_data = tenancy.get("units") or {}
     prop_data = unit_data.get("properties") or {}
-    
+
     if prop_data.get("landlord_id") != landlord_id:
-        raise HTTPException(status_code=403, detail="Not authorized to view this tenant's calls")
+        raise HTTPException(
+            status_code=403, detail="Not authorized to view this tenant's calls"
+        )
     """Get call history for a specific tenant with pagination."""
     sb = get_supabase()
-    
+
     count_res = (
         sb.table("call_logs")
         .select("*", count="exact")
@@ -399,9 +416,9 @@ async def get_tenant_calls(
         .execute()
     )
     total = count_res.count or 0
-    
+
     offset = (page - 1) * page_size
-    
+
     result = (
         sb.table("call_logs")
         .select("*")
@@ -410,10 +427,10 @@ async def get_tenant_calls(
         .range(offset, offset + page_size - 1)
         .execute()
     )
-    
+
     calls = result.data or []
     total_pages = (total + page_size - 1) // page_size if total > 0 else 1
-    
+
     return PaginatedCallHistoryResponse(
         calls=[
             CallHistoryItem(
@@ -446,7 +463,11 @@ async def initiate_tenant_call(
         raise HTTPException(status_code=500, detail=tenants_result.get("error_message"))
 
     tenant = next(
-        (t for t in tenants_result.get("tenants", []) if t.get("tenant_id") == tenant_id),
+        (
+            t
+            for t in tenants_result.get("tenants", [])
+            if t.get("tenant_id") == tenant_id
+        ),
         None,
     )
     if not tenant:
@@ -480,10 +501,12 @@ async def initiate_tenant_call(
     status = call_result.get("status") or "failed"
     message = call_result.get("message") or "Call failed"
     provider_status = call_result.get("data", {}).get("provider_status")
+    error_message = call_result.get("error_message")
 
     return CallInitiationResponse(
         call_id=call_id,
         status=status,
         message=message,
         provider_status=provider_status,
+        error_message=error_message,
     )

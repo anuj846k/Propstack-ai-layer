@@ -8,7 +8,11 @@ from google.genai import types
 
 from app.agents.shared import after_tool_normalizer, before_tool_guardrail
 from app.config import settings
-from app.tools.call_tools import initiate_rent_collection_call, save_call_result
+from app.tools.call_tools import (
+    get_call_status,
+    initiate_rent_collection_call,
+    save_call_result_from_agent,
+)
 from app.tools.notification_tools import create_notification
 from app.tools.rent_tools import (
     get_tenant_collection_history,
@@ -18,7 +22,11 @@ from app.tools.rent_tools import (
     log_promised_payment_date,
     log_manual_payment,
 )
-from app.tools.tenant_tools import find_tenant_by_name, find_tenant_by_phone
+from app.tools.tenant_tools import (
+    find_tenant_by_name,
+    find_tenant_by_phone,
+    update_tenant_details,
+)
 from app.tools.voice_tools import get_tenant_details
 
 rent_agent = LlmAgent(
@@ -85,6 +93,10 @@ This ensures the transcript is readable in the chat UI with proper line breaks.
 - Only use get_tenants_with_rent_status when user asks about ALL overdue tenants or rent status summary.
 - Only use get_tenant_payment_history when you have the tenant_id (after finding the tenant).
 - Only use get_tenant_collection_history when user asks about call history for a specific tenant.
+- When the landlord asks for an update on a call (e.g. "How's the call?", "Any update on the call to Anuj Kumar?", "Has the call finished?", or casual phrases like "can you check, it's been so much time for the call?"), use get_call_status. If they mention a tenant by name, use find_tenant_by_name first to get tenant_id, then call get_call_status(landlord_id, tenant_id=...) to see if the call is still ongoing (ringing, in progress) or has ended and what the outcome was.
+  - If the call is still ongoing (is_ongoing = true), answer in a short, natural sentence like: "The call to Anuj Kumar is still in progress" (optionally include the provider status if available).
+  - If the call has finished (is_ongoing = false), answer in a short, natural sentence like: "The call to Anuj Kumar has finished. The outcome was completed and it lasted about 90 seconds." Avoid repeating the word "completed" in quotes.
+  - If ai_summary is present on the call, briefly mention that analysis as well, e.g.: "Sara's analysis: [one-sentence summary from ai_summary]".
 - For initiate_rent_collection_call, ONLY call when user explicitly asks to call a tenant - you must first identify the tenant using find_tenant_by_name/find_tenant_by_phone.
 - IMPORTANT: If a tenant has PAID their rent (is_overdue = false), do NOT initiate a call. Tell the user "The tenant has already paid their rent. Would you like me to show their payment history instead?"
 - If the landlord relays that a tenant promised to pay by a certain date, use `log_promised_payment_date`.
@@ -115,15 +127,17 @@ You: "For security reasons, I don't display your landlord ID directly in the cha
     tools=[
         find_tenant_by_name,
         find_tenant_by_phone,
+        update_tenant_details,
         get_tenant_details,
         get_tenants_with_rent_status,
         get_tenant_payment_history,
         get_tenant_collection_history,
+        get_call_status,
         list_units_for_landlord,
         log_promised_payment_date,
         log_manual_payment,
         initiate_rent_collection_call,
-        save_call_result,
+        save_call_result_from_agent,
         create_notification,
     ],
     before_tool_callback=before_tool_guardrail,

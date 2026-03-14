@@ -426,9 +426,10 @@ async def get_chat_sessions(
 
                         import re
 
-                        # Strip injected hidden landlord context instructions
+                        # Strip injected hidden landlord context instructions,
+                        # whether they are on the same line or separate lines.
                         clean_text = re.sub(
-                            r"\n\n\[Context: The authenticated landlord ID.*?\]",
+                            r"\s*\[Context:[\s\S]*?\]",
                             "",
                             text,
                             flags=re.DOTALL,
