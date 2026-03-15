@@ -378,6 +378,27 @@ async def chat_stream(
     )
 
 
+@router.delete("/chat/sessions/{session_id}")
+async def delete_chat_session(
+    session_id: str,
+    x_internal_secret: str = Depends(verify_internal_request),
+    x_landlord_id: str | None = Header(None, alias="x-landlord-id"),
+):
+    """Delete a chat session and its history (clears context for that conversation)."""
+    landlord_id = x_landlord_id
+    if landlord_id:
+        landlord_id = _resolve_landlord_id(landlord_id)
+    if not landlord_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if session_id == "new":
+        raise HTTPException(status_code=400, detail="Cannot delete placeholder session id 'new'")
+
+    await session_service.delete_session(
+        app_name="propstack_rent", user_id=landlord_id, session_id=session_id
+    )
+    return {"status": "deleted", "session_id": session_id}
+
+
 @router.get("/chat/sessions")
 async def get_chat_sessions(
     x_internal_secret: str = Depends(verify_internal_request),

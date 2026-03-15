@@ -29,21 +29,16 @@ class Settings(BaseSettings):
     supabase_service_key: str = ""
     supabase_anon_key: str = ""
     supabase_db_password: str = ""
-    # Optional: full Session Pooler URL from Supabase dashboard.
-    # Example: postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
     supabase_database_url: str = ""
-    # Optional: Session Pooler host from Supabase dashboard.
-    # Example: aws-0-ap-south-1.pooler.supabase.com
     supabase_pooler_host: str = ""
     supabase_pooler_port: int = 5432
     supabase_jwt_secret: str = ""
-    google_api_key: str = ""
+    # Vertex AI (google-genai reads these from env when GOOGLE_GENAI_USE_VERTEXAI=TRUE)
+    google_cloud_project: str = ""
+    google_cloud_location: str = "us-central1"
     gemini_model: str = "gemini-2.5-flash"
-    gemini_live_model: str = "gemini-2.5-flash-native-audio-preview-12-2025"
+    gemini_live_model: str = "gemini-live-2.5-flash-native-audio"
     gemini_live_location: str = "us-central1"
-    livekit_url: str = ""
-    livekit_api_key: str = ""
-    livekit_api_secret: str = ""
     sip_trunk_id: str = ""
     environment: str = "development"
     log_level: str = "INFO"  # DEBUG in dev, INFO/WARNING in prod

@@ -219,6 +219,21 @@ def _vendor_accepts_ticket(vendor_id: str, ticket_id: str) -> dict:
     now = datetime.now(timezone.utc).isoformat()
     
     try:
+        # Insert activity_log first while ticket is still visible (avoids FK failure if RLS
+        # or replication hides the row after we update)
+        try:
+            sb.table("activity_log").insert({
+                "ticket_id": ticket_id,
+                "action": "vendor_assigned",
+                "notes": f"Vendor {vendor_id} accepted and was assigned to the ticket.",
+            }).execute()
+        except Exception as log_err:
+            logger.warning(
+                "activity_log insert failed (will still update ticket): %s",
+                log_err,
+                exc_info=True,
+            )
+
         # Update ticket status to assigned
         sb.table("maintenance_tickets").update({
             "status": "assigned",
@@ -230,13 +245,6 @@ def _vendor_accepts_ticket(vendor_id: str, ticket_id: str) -> dict:
         sb.table("vendor_dispatch_logs").update({
             "status": "accepted"
         }).eq("ticket_id", ticket_id).eq("vendor_id", vendor_id).execute()
-        
-        # Log to activity_log
-        sb.table("activity_log").insert({
-            "ticket_id": ticket_id,
-            "action": "vendor_assigned",
-            "description": f"Vendor {vendor_id} accepted and was assigned to the ticket."
-        }).execute()
         
         return {"status": "success", "message": "Successfully assigned the ticket to the vendor."}
     except Exception as e:
@@ -263,12 +271,19 @@ def _vendor_rejects_ticket(vendor_id: str, ticket_id: str) -> dict:
             "status": "rejected"
         }).eq("ticket_id", ticket_id).eq("vendor_id", vendor_id).execute()
         
-        # Log to activity_log
-        sb.table("activity_log").insert({
-            "ticket_id": ticket_id,
-            "action": "vendor_rejected",
-            "description": f"Vendor {vendor_id} rejected the job."
-        }).execute()
+        # Log to activity_log (non-fatal: rejection already recorded above)
+        try:
+            sb.table("activity_log").insert({
+                "ticket_id": ticket_id,
+                "action": "vendor_rejected",
+                "notes": f"Vendor {vendor_id} rejected the job.",
+            }).execute()
+        except Exception as log_err:
+            logger.warning(
+                "activity_log insert failed (rejection already recorded): %s",
+                log_err,
+                exc_info=True,
+            )
         
         return {"status": "success", "message": "Logged vendor rejection successfully. Please find_next_available_vendor."}
     except Exception as e:

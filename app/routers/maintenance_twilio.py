@@ -49,9 +49,34 @@ def _find_vendor_dispatch_log(dispatch_log_id: str):
 
 
 def _get_ticket_details(ticket_id: str):
+    """Fetch ticket with unit number and property name/address for vendor context."""
     sb = get_supabase()
-    res = sb.table("maintenance_tickets").select("*").eq("id", ticket_id).execute()
-    return res.data[0] if res.data else None
+    res = (
+        sb.table("maintenance_tickets")
+        .select(
+            "*, units(unit_number, properties(name, address, city, state))"
+        )
+        .eq("id", ticket_id)
+        .execute()
+    )
+    row = res.data[0] if res.data else None
+    if not row:
+        return None
+    # Flatten nested unit/property (Supabase may return object or list for FK)
+    units = row.get("units")
+    if isinstance(units, list) and units:
+        units = units[0]
+    units = units or {}
+    props = units.get("properties")
+    if isinstance(props, list) and props:
+        props = props[0]
+    props = props or {}
+    row["_unit_number"] = units.get("unit_number") or ""
+    row["_property_name"] = props.get("name") or ""
+    row["_property_address"] = props.get("address") or ""
+    row["_property_city"] = props.get("city") or ""
+    row["_property_state"] = props.get("state") or ""
+    return row
 
 
 def _get_vendor_details(vendor_id: str):
@@ -61,10 +86,18 @@ def _get_vendor_details(vendor_id: str):
 
 
 def _build_initial_greeting(vendor_name: str, ticket: dict) -> str:
-    """Build dynamic greeting for the vendor with language preference."""
+    """Build dynamic greeting for the vendor with property/unit and language preference."""
     issue = ticket.get("issue_description") or ticket.get("ai_summary") or "an issue"
     category = ticket.get("issue_category", "maintenance")
     priority = ticket.get("priority", "medium")
+    property_name = ticket.get("_property_name", "")
+    unit_number = ticket.get("_unit_number", "")
+    address = ticket.get("_property_address", "")
+    city = ticket.get("_property_city", "")
+    state = ticket.get("_property_state", "")
+
+    location_parts = [p for p in [property_name, unit_number, address, city, state] if p]
+    location_line = ", ".join(location_parts) if location_parts else "Address will be shared separately."
 
     greeting = f"""Hello {vendor_name}, this is Sara from the PropStack property management office calling.
 
@@ -73,11 +106,12 @@ Context for this call:
 - Ticket category: {category}
 - Priority: {priority}
 - Issue description: {issue}
+- WHERE TO COME: {location_line}. You MUST tell the vendor this location clearly (property name, unit number, and address if available) so they know where to come.
 
 First, ask: "Would you like to continue in English or Hindi?" (ask in English initially)
 Then proceed in the vendor's chosen language.
 
-After language is established, explain the issue and ask about their availability.
+After language is established, clearly state the job location (property, unit, address), then explain the issue and ask about their availability.
 """
     return greeting
 
