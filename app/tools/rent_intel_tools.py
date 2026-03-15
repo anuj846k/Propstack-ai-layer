@@ -369,7 +369,7 @@ async def estimate_market_rent_for_unit(
 
 async def analyze_rent_intelligence_for_landlord(
     landlord_id: str,
-    sample_limit: int = 10,
+    sample_limit: int = 5,
 ) -> dict[str, Any]:
     """Analyze rent intelligence for a landlord's portfolio.
 
@@ -415,21 +415,25 @@ async def analyze_rent_intelligence_for_landlord(
             "units": [],
         }
 
-    # Limit number of units we call Google Search for, to keep latency/cost bounded.
+    # Limit number of units we call Google Search / LLM for, to keep latency/cost bounded.
     sample = units[: max(1, sample_limit)]
 
     underpriced_units = 0
     total_uplift = 0.0
     unit_results: list[dict[str, Any]] = []
 
-    for unit in sample:
+    # Fan out per-unit market rent estimation in parallel to reduce total latency.
+    import asyncio
+
+    async def _estimate_for_unit(unit: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        """Run market rent estimation for a single unit and return (unit, result_or_none)."""
         prop = props.get(unit.get("property_id"))
         city = (prop or {}).get("city") or ""
         state = (prop or {}).get("state") or None
         rent_amount = float(unit.get("rent_amount") or 0.0)
 
         if not city or rent_amount <= 0:
-            continue
+            return unit, None
 
         description = f"Rental unit {unit.get('unit_number') or ''} in {city}, {state or ''}"
         market_res = await estimate_market_rent_for_unit(
@@ -439,11 +443,28 @@ async def analyze_rent_intelligence_for_landlord(
             current_rent=rent_amount,
         )
         if market_res.get("status") != "success":
-            continue
+            return unit, None
 
         data = market_res.get("data") or {}
+        return unit, data
+
+    tasks = [asyncio.create_task(_estimate_for_unit(unit)) for unit in sample]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for result in results:
+        if isinstance(result, Exception):
+            continue
+        unit, data = result
+        if not data:
+            continue
+
+        prop = props.get(unit.get("property_id"))
+        city = (prop or {}).get("city") or ""
+        state = (prop or {}).get("state") or None
+        rent_amount = float(unit.get("rent_amount") or 0.0)
+
         market_rent = float(data.get("market_rent_estimate") or 0.0)
-        if market_rent <= 0:
+        if market_rent <= 0 or rent_amount <= 0:
             continue
 
         delta = market_rent - rent_amount
