@@ -1,7 +1,12 @@
 import asyncio
+import logging
 from datetime import datetime, timezone
 from app.dependencies import get_supabase
 from app.integrations import twilio_voice
+from app.config import settings
+from app.services.live_session_service import live_session_service
+
+logger = logging.getLogger(__name__)
 
 def _create_maintenance_ticket(
     tenant_id: str,
@@ -72,9 +77,12 @@ async def create_maintenance_ticket(
     )
     if result.get("status") == "success":
         ticket_id = result["ticket"]["id"]
-        # Trigger outbound voice dispatch immediately during the tool execution
-        await _dispatch_vendor_for_ticket(ticket_id, issue_category)
-        result["message"] = "Ticket created! A vendor has been dispatched. Tell the user this explicitly."
+        logger.info(f"Attempting vendor dispatch for ticket {ticket_id}, specialty: {issue_category}")
+        dispatch_result = await _dispatch_vendor_for_ticket(ticket_id, issue_category)
+        logger.info(f"Vendor dispatch result: {dispatch_result}")
+        result["ticket_id"] = ticket_id
+        result["category"] = issue_category
+        result["created_at"] = result["ticket"].get("created_at")
     return result
 
 
@@ -128,9 +136,13 @@ def _find_next_available_vendor(ticket_id: str, specialty: str) -> dict:
 
 async def _dispatch_vendor_for_ticket(ticket_id: str, specialty: str) -> dict:
     """Find the next available vendor and initiate a Twilio voice call."""
+    logger.info(f"_dispatch_vendor_for_ticket called: ticket_id={ticket_id}, specialty={specialty}")
+    
     next_vendor_res = await find_next_available_vendor(ticket_id, specialty)
+    logger.info(f"find_next_available_vendor result: {next_vendor_res}")
 
     if next_vendor_res["status"] == "error":
+        logger.error(f"Failed to find vendor: {next_vendor_res}")
         return next_vendor_res
 
     vendor = next_vendor_res["vendor"]
@@ -138,6 +150,7 @@ async def _dispatch_vendor_for_ticket(ticket_id: str, specialty: str) -> dict:
     dispatch_log_id = vendor.get("dispatch_log_id")
 
     if not dispatch_log_id:
+        logger.error(f"Missing dispatch_log_id for vendor {vendor}")
         return {"status": "error", "message": "Missing dispatch log id"}
 
     try:
@@ -145,6 +158,8 @@ async def _dispatch_vendor_for_ticket(ticket_id: str, specialty: str) -> dict:
         
         twiml_url = maintenance_twilio.twiml_url(dispatch_log_id)
         status_url = maintenance_twilio.status_callback_url(dispatch_log_id)
+        
+        logger.info(f"Initiating Twilio call to {vendor_phone}, twiml_url={twiml_url}")
 
         provider = twilio_voice.create_outbound_call(
             to_number=vendor_phone,
@@ -152,14 +167,38 @@ async def _dispatch_vendor_for_ticket(ticket_id: str, specialty: str) -> dict:
             twiml_url_override=twiml_url,
             status_callback_override=status_url,
         )
+        
+        logger.info(f"Twilio call initiated successfully: {provider}")
+        
+        provider_call_sid = provider.get("provider_call_sid")
+        live_session_id = None
+        
+        if settings.enable_partner_twilio_live:
+            logger.info(f"Starting live session for maintenance dispatch, dispatch_log_id={dispatch_log_id}")
+            live_record = live_session_service.start_session(
+                call_id=dispatch_log_id,
+                source="maintenance_dispatch",
+                provider_call_sid=provider_call_sid,
+                metadata={
+                    "ticket_id": ticket_id,
+                    "vendor_id": vendor["id"],
+                    "vendor_name": vendor["name"],
+                    "vendor_phone": vendor_phone,
+                    "specialty": specialty,
+                },
+            )
+            live_session_id = live_record.get("session_id")
+            logger.info(f"Live session started: {live_session_id}")
 
         return {
             "status": "success",
             "message": f"Initiated call to vendor {vendor['name']} at {vendor_phone}",
             "vendor": vendor,
             "provider_status": provider["provider_status"],
+            "live_session_id": live_session_id,
         }
     except Exception as e:
+        logger.exception(f"Exception during vendor dispatch: {e}")
         return {"status": "error", "message": f"Failed to trigger Twilio call: {e}"}
 
 

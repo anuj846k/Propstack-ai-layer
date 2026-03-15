@@ -80,7 +80,6 @@ def create_outbound_call(
     call_id: str,
     twiml_url_override: str | None = None,
     status_callback_override: str | None = None,
-    enable_recording: bool = True,
 ) -> dict:
     call_params = dict(
         to=to_number,
@@ -92,15 +91,6 @@ def create_outbound_call(
         status_callback_event=["initiated", "ringing", "answered", "completed"],
         timeout=settings.twilio_call_timeout_seconds,
     )
-
-    # Enable recording and transcription for all calls
-    if enable_recording:
-        call_params.update(
-            {
-                "record": "record-from-ringing-dual",
-                "transcription_callback_url": f"{_base_url()}/api/v1/calls/twilio/transcription?call_id={call_id}",
-            }
-        )
 
     call = get_client().calls.create(**call_params)
     return {

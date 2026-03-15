@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     supabase_jwt_secret: str = ""
     google_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"
-    gemini_live_model: str = "gemini-live-2.5-flash-native-audio"
+    gemini_live_model: str = "gemini-2.5-flash-native-audio-preview-12-2025"
     gemini_live_location: str = "us-central1"
     livekit_url: str = ""
     livekit_api_key: str = ""

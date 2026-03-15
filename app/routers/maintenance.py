@@ -23,33 +23,6 @@ def _form_to_string_dict(form_data) -> dict[str, str]:
     return {str(k): str(v) for k, v in form_data.items()}
 
 
-def _extract_user_facing_tool_message(tool_response: object) -> str:
-    """
-    Extract the best user-facing message from an ADK tool response.
-
-    We prefer nested `data.message` (tool-specific user response), then `message`.
-    """
-    def _sanitize(msg: str) -> str:
-        cleaned = msg.strip()
-        cleaned = cleaned.replace("Tell the user this explicitly.", "").strip()
-        # Normalize any leftover double spaces after removal.
-        while "  " in cleaned:
-            cleaned = cleaned.replace("  ", " ")
-        return cleaned
-
-    if not isinstance(tool_response, dict):
-        return ""
-    data = tool_response.get("data")
-    if isinstance(data, dict):
-        msg = data.get("message")
-        if isinstance(msg, str) and msg.strip():
-            return _sanitize(msg)
-    msg = tool_response.get("message")
-    if isinstance(msg, str) and msg.strip():
-        return _sanitize(msg)
-    return ""
-
-
 @router.post("/twilio-whatsapp-incoming")
 async def twilio_whatsapp_incoming(
     request: Request,
@@ -141,52 +114,26 @@ async def twilio_whatsapp_incoming(
     )
 
     final_text = ""
-    tool_msg = ""  # Message from tool
     content = types.Content(role="user", parts=parts)
 
     try:
         async for event in runner.run_async(
-            user_id=tenant_id,
+            user_id=str(tenant_id),
             session_id=session_id,
             new_message=content,
         ):
-            # Log all events for debugging
             logger.info(f"Event author: {event.author}")
-            
-            # Extract message from tool response
-            func_responses = event.get_function_responses()
-            if func_responses:
-                logger.info(f"Found {len(func_responses)} function responses")
-                for resp in func_responses:
-                    logger.info(f"  resp: {resp}")
-                    logger.info(f"  resp.response type: {type(resp.response)}")
-                    logger.info(f"  resp.response: {resp.response}")
-                    
-                    if hasattr(resp, 'response'):
-                        extracted = _extract_user_facing_tool_message(resp.response)
-                        # Only accept meaningful messages (avoid generic "tool completed").
-                        if extracted and "completed" not in extracted.lower():
-                            tool_msg = extracted
-                            logger.info(f"Tool message found: {extracted}")
-                        else:
-                            # Try to get message from nested structure
-                            logger.info(f"Response is not dict, checking other formats")
-            
-            # Get agent text
+
             if event.content and event.content.parts:
                 for part in event.content.parts:
                     if part.text and part.text.strip():
                         final_text = part.text.strip()
-                        logger.info(f"Agent text: {final_text[:100]}")
-                        
+                        logger.info(f"Agent text: {final_text[:200]}")
+
     except Exception as e:
         logger.error(f"Error: {e}")
 
-    # Use tool message if available, else use agent text
-    if tool_msg:
-        final_text = tool_msg
-        logger.info(f"Using tool message: {final_text}")
-    elif not final_text:
+    if not final_text:
         final_text = "I've received your request. A vendor will contact you soon."
         logger.info("Using fallback message")
 

@@ -163,6 +163,8 @@ def _create_call_log(
             outcome="initiated",
         )
 
+        sb.table("call_logs").update({"provider_call_sid": provider_call_sid}).eq("id", call_id).execute()
+
         return _envelope(
             status="queued",
             message=(

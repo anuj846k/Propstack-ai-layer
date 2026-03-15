@@ -182,23 +182,19 @@ async def twilio_transcription_callback(
 
 
 def _find_call_id_by_provider_sid(call_sid: str) -> str | None:
-    """Resolve internal call_logs.id from Twilio CallSid using provider_metadata."""
+    """Resolve internal call_logs.id from Twilio CallSid using provider_call_sid column."""
     if not call_sid:
         return None
     sb = get_supabase()
-    # Status callback stores Twilio payload in provider_metadata.twilio; fetch recent rows
     result = (
         sb.table("call_logs")
-        .select("id, provider_metadata")
-        .order("created_at", desc=True)
-        .limit(200)
+        .select("id")
+        .eq("provider_call_sid", call_sid)
+        .limit(1)
         .execute()
     )
-    for row in (result.data or []):
-        meta = row.get("provider_metadata") or {}
-        twilio_payload = meta.get("twilio") if isinstance(meta.get("twilio"), dict) else {}
-        if twilio_payload.get("CallSid") == call_sid:
-            return row.get("id")
+    if result.data:
+        return result.data[0].get("id")
     return None
 
 
@@ -288,17 +284,15 @@ async def twilio_status_callback(
     update_payload = {
         "outcome": mapped["outcome"],
         "duration_seconds": duration_seconds if mapped["is_terminal"] else 0,
-        "provider_metadata": {
-            "provider": "twilio_voice",
-            "twilio": form_payload,
-        },
     }
+    if provider_call_sid:
+        update_payload["provider_call_sid"] = provider_call_sid
     if transcript:
         update_payload["transcript"] = transcript
 
     result = sb.table("call_logs").update(update_payload).eq("id", call_id).execute()
-    if result.get("status") == "error":
-        raise HTTPException(status_code=400, detail=result.get("error_message"))
+    if not result.data:
+        raise HTTPException(status_code=400, detail="Failed to update call log")
 
     notification_id = None
     if mapped["is_terminal"]:
