@@ -91,7 +91,11 @@ async def generate_call_analysis(
     try:
         from google import genai
 
-        client = genai.Client(api_key=settings.google_api_key)
+        client = genai.Client(
+            vertexai=True,
+            project=settings.google_cloud_project,
+            location=settings.google_cloud_location,
+        )
         response = client.models.generate_content(
             model=settings.gemini_model,
             contents=prompt,

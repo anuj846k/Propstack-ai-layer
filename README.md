@@ -6,6 +6,13 @@ This is our submission to the **Gemini Live Agent Challenge** in the **Live Agen
 
 ---
 
+## Code Repositories
+
+- **Frontend:** [https://github.com/anuj846k/PropStack](https://github.com/anuj846k/PropStack) (Next.js 16 dashboard)
+- **Backend (AI Agents):** [https://github.com/anuj846k/Propstack-ai-layer](https://github.com/anuj846k/Propstack-ai-layer) (Python FastAPI + Google ADK)
+
+---
+
 ## Problem & Vision
 
 Independent landlords juggle three painful jobs:
@@ -93,7 +100,7 @@ This project intentionally goes beyond "chatbot in a div":
 
 Click the image below to watch the recording proving the backend is running on Google Cloud Run with Vertex AI:
 
-[![Google Cloud Deployment Proof](./assets/architecture/Gcloud.png)](https://storage.googleapis.com/propstack-bucket/gcloudmp4.mp4){:target="_blank"}
+[![Google Cloud Deployment Proof](https://storage.googleapis.com/propstack-bucket/assets/architecture/Gcloud.png)](https://storage.googleapis.com/propstack-bucket/gcloudmp4.mp4){:target="\_blank"}
 
 ---
 
@@ -101,7 +108,7 @@ Click the image below to watch the recording proving the backend is running on G
 
 **System overview:** how the Next.js dashboard, Twilio (WhatsApp + Voice), FastAPI + ADK agents (Cloud Run), Vertex AI (Gemini + Gemini Live), and Supabase work together.
 
-![Architecture Diagram](./assets/architecture/Architecture.png)
+![Architecture Diagram](https://storage.googleapis.com/propstack-bucket/assets/architecture/Architecture.png)
 
 **Tip:** Place the architecture image at `propstack-ai/assets/architecture/Architecture.png` so it renders on GitHub/Devpost.
 
@@ -113,28 +120,28 @@ Click the image below to watch the recording proving the backend is running on G
 
 The landing page introduces PropStack and the “Sara” live agent experience for landlords.
 
-![Landing Page Hero](./assets/landing/Hero.png)
-![Landing Page Features](./assets/landing/Features.png)
+![Landing Page Hero](https://storage.googleapis.com/propstack-bucket/assets/landing/Hero.png)
+![Landing Page Features](https://storage.googleapis.com/propstack-bucket/assets/landing/Hero.png)
 
 ### Dashboard (Landlord)
 
 The dashboard shows portfolio insights (vacancy cost, open tickets, rent activity) and connects directly to the live agent workflows.
 
-![Dashboard Screenshot](./assets/dashboard/Dashboard.png)
+![Dashboard Screenshot](https://storage.googleapis.com/propstack-bucket/assets/dashboard/Dashboard.png)
 
 ### Chat and Call with Sara (ADK Agents)
 
 Landlords can chat with Sara for rent status, tenant lookup, and management actions (grounded in Supabase via tools).
 
-![Chat Screenshot](./assets/dashboard/Chat.png)
-![Call Agent Screenshot](./assets/dashboard/CallAgent.png)
+![Chat Screenshot](https://storage.googleapis.com/propstack-bucket/assets/dashboard/Chat.png)
+![Call Agent Screenshot](https://storage.googleapis.com/propstack-bucket/assets/dashboard/CallAgent.png)
 
 ### Maintenance Tickets with Twilio Whatsapp (ADK Agents)
 
 Tenants can report issues via WhatsApp — sending text messages with optional photos. The AI agent triages these messages, asks clarifying questions when needed, and automatically creates structured maintenance tickets in the system. Landlords see all tickets on their dashboard with images, priority, and status.
 
-![Owner Dashboard Tickets](./assets/dashboard/Tickets.png)
-![Tenant Side Whatsapp](./assets/dashboard/WhatsappAgent.png)
+![Owner Dashboard Tickets](https://storage.googleapis.com/propstack-bucket/assets/dashboard/Tickets.png)
+![Tenant Side Whatsapp](https://storage.googleapis.com/propstack-bucket/assets/dashboard/WhatsappAgent.png)
 
 ```
 
@@ -356,6 +363,22 @@ Test coverage:
 
 ## Future Work
 
+### Vision: Next-Gen RWA (Resident Welfare Association) Platform
+
+This project started as a vision to upgrade everyday apps like **MyGate** — a widely used RWA management platform — into an agentic, AI-powered system. While MyGate handles CRUD operations for society management, the world is moving toward agentic workflows. We envision integrating AI agents to handle:
+
+- **Automated visitor verification** with AI-powered security checks
+- **Smart maintenance dispatch** — agents that call vendors, negotiate prices, and schedule repairs
+- **AI community managers** — handling complaints, announcements, and resident communication
+- **Financial automation** — rent collection, invoice generation, and expense tracking with intelligent reminders
+- **Compliance & security** — AI agents that monitor suspicious activities and alert security
+
+PropStack demonstrates the core AI capabilities (voice agents, WhatsApp integration, live vendor calls) that can power the next generation of RWA platforms — making residential societies more secure, efficient, and tech-enabled.
+
+---
+
+### Technical Roadmap
+
 - Richer call analytics (sentiment, outcome classification)
 - Sophisticated vendor selection (skills, geofencing)
 - Landlord configuration UI
@@ -405,5 +428,16 @@ See `propstack-ai/app/config.py` for Vertex AI configuration:
 Cloud Run deployment commands are documented in the Setup section above.
 
 ---
+
+### End-to-end test flow
+
+You can test the full PropStack flow (from data setup through rent checks, calls, and logging) by following the step-by-step scenarios described in [`propstack-ai/TEST_PLAN.md`](./TEST_PLAN.md).
+
+That document covers:
+
+- Creating landlords, properties, units, and tenancies
+- Generating rent cycles
+- Triggering rent collection calls
+- Verifying call logs, summaries, and payment updates
 
 _Built with ❤️ for the Gemini Live Agent Challenge_
