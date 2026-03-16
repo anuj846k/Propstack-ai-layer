@@ -126,16 +126,19 @@ The dashboard shows portfolio insights (vacancy cost, open tickets, rent activit
 Landlords can chat with Sara for rent status, tenant lookup, and management actions (grounded in Supabase via tools).
 
 ![Chat Screenshot](./assets/dashboard/Chat.png)
-![Chat Screenshot](./assets/dashboard/CallAgent.png)
+![Call Agent Screenshot](./assets/dashboard/CallAgent.png)
 
 
 ### Maintenance Tickets with Twilio Whatsapp (ADK Agents)
+
 ![Owner Dashboard Tickets](./assets/dashboard/Tickets.png)
 ![Tenant Side Whatsapp](./assets/dashboard/WhatsappAgent.png)
 
+Tenants can report issues via WhatsApp — sending text messages with optional photos. The AI agent triages these messages, asks clarifying questions when needed, and automatically creates structured maintenance tickets in the system. Landlords see all tickets on their dashboard with images, priority, and status.
 
 
 
+ 
 
 ```
 
