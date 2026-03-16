@@ -91,7 +91,50 @@ This project intentionally goes beyond "chatbot in a div":
 
 ## Architecture
 
-![Architecture.png](/Architecture.png)
+**System overview:** how the Next.js dashboard, Twilio (WhatsApp + Voice), FastAPI + ADK agents (Cloud Run), Vertex AI (Gemini + Gemini Live), and Supabase work together.
+
+![Architecture Diagram](./assets/architecture/Architecture.png)
+
+**Tip:** Place the architecture image at `propstack-ai/assets/architecture/Architecture.png` so it renders on GitHub/Devpost.
+
+---
+
+## Product Screenshots
+
+### Architecture (High-Level)
+
+This diagram is the “big picture” for judges: where Gemini Live runs, where data is grounded (Supabase), and how Twilio voice/WhatsApp connect to the agents.
+
+![Architecture Diagram](./assets/architecture/Architecture.png)
+
+### Landing Page
+
+The landing page introduces PropStack and the “Sara” live agent experience for landlords.
+
+![Landing Page Hero](./assets/landing/Hero.png)
+![Landing Page Features](./assets/landing/Features.png)
+
+### Dashboard (Landlord)
+
+The dashboard shows portfolio insights (vacancy cost, open tickets, rent activity) and connects directly to the live agent workflows.
+
+![Dashboard Screenshot](./assets/dashboard/Dashboard.png)
+
+
+### Chat and Call with Sara (ADK Agents)
+
+Landlords can chat with Sara for rent status, tenant lookup, and management actions (grounded in Supabase via tools).
+
+![Chat Screenshot](./assets/dashboard/Chat.png)
+![Chat Screenshot](./assets/dashboard/CallAgent.png)
+
+
+### Maintenance Tickets with Twilio Whatsapp (ADK Agents)
+![Owner Dashboard Tickets](./assets/dashboard/Tickets.png)
+![Tenant Side Whatsapp](./assets/dashboard/WhatsappAgent.png)
+
+
+
 
 
 ```
