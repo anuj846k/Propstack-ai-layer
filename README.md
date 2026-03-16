@@ -101,12 +101,6 @@ This project intentionally goes beyond "chatbot in a div":
 
 ## Product Screenshots
 
-### Architecture (High-Level)
-
-This diagram is the “big picture” for judges: where Gemini Live runs, where data is grounded (Supabase), and how Twilio voice/WhatsApp connect to the agents.
-
-![Architecture Diagram](./assets/architecture/Architecture.png)
-
 ### Landing Page
 
 The landing page introduces PropStack and the “Sara” live agent experience for landlords.
