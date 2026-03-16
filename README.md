@@ -101,6 +101,12 @@ This project intentionally goes beyond "chatbot in a div":
 
 ## Product Screenshots
 
+### Architecture (High-Level)
+
+This diagram is the “big picture” for judges: where Gemini Live runs, where data is grounded (Supabase), and how Twilio voice/WhatsApp connect to the agents.
+
+![Architecture Diagram](./assets/architecture/Architecture.png)
+
 ### Landing Page
 
 The landing page introduces PropStack and the “Sara” live agent experience for landlords.
@@ -114,7 +120,6 @@ The dashboard shows portfolio insights (vacancy cost, open tickets, rent activit
 
 ![Dashboard Screenshot](./assets/dashboard/Dashboard.png)
 
-
 ### Chat and Call with Sara (ADK Agents)
 
 Landlords can chat with Sara for rent status, tenant lookup, and management actions (grounded in Supabase via tools).
@@ -122,17 +127,12 @@ Landlords can chat with Sara for rent status, tenant lookup, and management acti
 ![Chat Screenshot](./assets/dashboard/Chat.png)
 ![Call Agent Screenshot](./assets/dashboard/CallAgent.png)
 
-
 ### Maintenance Tickets with Twilio Whatsapp (ADK Agents)
-
-![Owner Dashboard Tickets](./assets/dashboard/Tickets.png)
-![Tenant Side Whatsapp](./assets/dashboard/WhatsappAgent.png)
 
 Tenants can report issues via WhatsApp — sending text messages with optional photos. The AI agent triages these messages, asks clarifying questions when needed, and automatically creates structured maintenance tickets in the system. Landlords see all tickets on their dashboard with images, priority, and status.
 
-
-
- 
+![Owner Dashboard Tickets](./assets/dashboard/Tickets.png)
+![Tenant Side Whatsapp](./assets/dashboard/WhatsappAgent.png)
 
 ```
 
