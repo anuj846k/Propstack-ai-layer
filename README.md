@@ -321,6 +321,15 @@ Test coverage:
 2. **WhatsApp**: Send maintenance issues with/without images
 3. **Vendor Calls**: Trigger dispatch, accept/reject as vendor
 
+### Demo credentials
+
+For quick end-to-end testing with pre-populated sample data, you can sign in with:
+
+- **Email**: `admin@gmail.com`
+- **Password**: `Test@123`
+
+Use this account to explore the dashboard, rent flows, and maintenance tickets without having to seed everything from scratch.
+
 ---
 
 ## Data, Grounding & Safety
@@ -413,7 +422,7 @@ propstack-main/
 
 ## Demo Video
 
-[Watch the 4-minute demo video →](#) _(Add your video link)_
+[Watch the 4-minute demo video →](https://youtu.be/7aZmRhIZRCs?si=jDM3WjHqIYfmmY3W)
 
 ---
 
