@@ -95,8 +95,6 @@ This project intentionally goes beyond "chatbot in a div":
 
 ![Architecture Diagram](./assets/architecture/Architecture.png)
 
-**Tip:** Place the architecture image at `propstack-ai/assets/architecture/Architecture.png` so it renders on GitHub/Devpost.
-
 ---
 
 ## Product Screenshots
