@@ -89,11 +89,21 @@ This project intentionally goes beyond "chatbot in a div":
 
 ---
 
+## Proof of Google Cloud Deployment
+
+Click the image below to watch the recording proving the backend is running on Google Cloud Run with Vertex AI:
+
+[![Google Cloud Deployment Proof](./assets/architecture/Gcloud.png)](https://storage.googleapis.com/propstack-bucket/gcloudmp4.mp4){:target="_blank"}
+
+---
+
 ## Architecture
 
 **System overview:** how the Next.js dashboard, Twilio (WhatsApp + Voice), FastAPI + ADK agents (Cloud Run), Vertex AI (Gemini + Gemini Live), and Supabase work together.
 
 ![Architecture Diagram](./assets/architecture/Architecture.png)
+
+**Tip:** Place the architecture image at `propstack-ai/assets/architecture/Architecture.png` so it renders on GitHub/Devpost.
 
 ---
 
