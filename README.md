@@ -348,6 +348,19 @@ Test coverage:
 2. **WhatsApp**: Send maintenance issues with/without images
 3. **Vendor Calls**: Trigger dispatch, accept/reject as vendor
 
+### Twilio trial account note
+
+Right now the voice/WhatsApp flows run on a **Twilio trial account**, which means:
+
+- Outbound calls can only be placed to **verified numbers** on my Twilio account.
+- In my demo this is configured with **only my own phone number** as a verified destination.
+
+If you clone this project and want to run the full voice/WhatsApp flows yourself, you should:
+
+1. Create your own Twilio account (and upgrade out of trial if you want to call arbitrary numbers).
+2. Update the Twilio environment variables in `.env` (`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_VOICE_FROM_NUMBER`, WhatsApp sender, etc.).
+3. Optionally verify your own test numbers (if you stay on a trial account) and trigger calls to those numbers instead.
+
 ### Demo credentials
 
 For quick end-to-end testing with pre-populated sample data, you can sign in with:
@@ -367,24 +380,6 @@ That document covers:
 - Generating rent cycles
 - Triggering rent collection calls
 - Verifying call logs, summaries, and payment updates
-
----
-
-## Data, Grounding & Safety
-
-### Data Grounding
-
-- All operational decisions grounded in Supabase tables
-- Agents explicitly instructed to use tools for all data access
-- No hallucinated SQL or phone numbers
-- Re-fetch data when user says "DB has been updated"
-
-### Safety
-
-- Call windows enforced (IST 09:00–20:00)
-- Rate limits (max 2 calls/tenant/day)
-- Tool layer validation before execution
-- Error codes from ADK (SAFETY/BLOCKLIST) end calls gracefully
 
 ---
 
