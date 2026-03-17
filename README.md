@@ -100,7 +100,7 @@ This project intentionally goes beyond "chatbot in a div":
 
 Click the image below to watch the recording proving the backend is running on Google Cloud Run with Vertex AI:
 
-[![Google Cloud Deployment Proof](https://storage.googleapis.com/propstack-bucket/assets/architecture/Gcloud.png)](https://storage.googleapis.com/propstack-bucket/gcloudmp4.mp4){:target="\_blank"}
+[![Google Cloud Deployment Proof](https://storage.googleapis.com/propstack-bucket/assets/architecture/Gcloud.png)](https://storage.googleapis.com/propstack-bucket/gcloudmp4.mp4)
 
 ---
 
@@ -109,8 +109,6 @@ Click the image below to watch the recording proving the backend is running on G
 **System overview:** how the Next.js dashboard, Twilio (WhatsApp + Voice), FastAPI + ADK agents (Cloud Run), Vertex AI (Gemini + Gemini Live), and Supabase work together.
 
 ![Architecture Diagram](https://storage.googleapis.com/propstack-bucket/assets/architecture/Architecture.png)
-
-**Tip:** Place the architecture image at `propstack-ai/assets/architecture/Architecture.png` so it renders on GitHub/Devpost.
 
 ---
 
@@ -142,8 +140,6 @@ Tenants can report issues via WhatsApp — sending text messages with optional p
 
 ![Owner Dashboard Tickets](https://storage.googleapis.com/propstack-bucket/assets/dashboard/Tickets.png)
 ![Tenant Side Whatsapp](https://storage.googleapis.com/propstack-bucket/assets/dashboard/WhatsappAgent.png)
-
-```
 
 | Component       | Technology                                            |
 | --------------- | ----------------------------------------------------- |
@@ -197,13 +193,41 @@ Tools: vendor_accepts_ticket / vendor_rejects_ticket
 ↓
 Updates: maintenance_tickets, vendor_dispatch_logs
 
-````
+```
 
 ---
 
-## Google Cloud & Gemini Usage
+## Tooling (ADK Function Tools)
 
-### Mandatory Tech Compliance
+PropStack’s agents are grounded via **Google ADK function tools** (plain Python functions) that read/write to Supabase and trigger Twilio workflows.
+
+### Rent & Payments (`app/tools/rent_tools.py`)
+- `get_tenants_with_rent_status(landlord_id)`
+- `get_tenant_payment_history(tenant_id)`
+- `get_tenant_collection_history(tenant_id)`
+- `log_promised_payment_date(tenant_id, promised_date)`
+- `log_manual_payment(tenant_id, amount)`
+- `list_units_for_landlord(landlord_id)`
+
+### Tenant Lookup (`app/tools/tenant_tools.py`)
+- `find_tenant_by_name(name, landlord_id)`
+- `find_tenant_by_phone(phone, landlord_id)`
+- `update_tenant_details(tenant_id, name?, phone?, email?, preferred_language?)`
+
+### Calls & Call Logs (`app/tools/call_tools.py`)
+- `initiate_rent_collection_call(landlord_id, tenant_id, tenant_name, tenant_phone, language, rent_amount, days_overdue, property_name, unit_number, landlord_name)`
+- `get_call_status(landlord_id, tenant_id?, call_id?)`
+- `save_call_result(call_id, transcript, outcome, duration_seconds, provider_metadata?)`
+- `save_call_result_from_agent(call_id, transcript, outcome, duration_seconds)`
+
+### Rent Intelligence (grounded market research) (`app/tools/rent_intel_tools.py`)
+- `get_vacancy_cost_for_landlord(landlord_id, as_of_date?)`
+- `estimate_market_rent_for_unit(city, state?, unit_description, current_rent?)`
+- `analyze_rent_intelligence_for_landlord(landlord_id, sample_limit=5)`
+
+> Note: `rent_intel_tools.py` also uses ADK’s built-in `google_search` tool for fresh comps.
+
+## Google Cloud & Gemini Usage
 
 **Gemini Models:**
 
@@ -228,7 +252,7 @@ Updates: maintenance_tickets, vendor_dispatch_logs
 GOOGLE_GENAI_USE_VERTEXAI=TRUE
 GOOGLE_CLOUD_PROJECT=your-project-id
 GOOGLE_CLOUD_LOCATION=us-central1
-````
+```
 
 ---
 
