@@ -2,7 +2,7 @@
 
 **PropStack** is an AI-powered property management platform that gives small landlords their own "AI operations team" — a live rent collection agent and a maintenance triage + vendor dispatch assistant that talk to tenants and vendors over voice and WhatsApp, grounded on real data in Supabase and deployed on Google Cloud Run with Gemini + ADK.
 
-This is our submission to the **Gemini Live Agent Challenge** in the **Live Agents** category.
+This is my submission to the **Gemini Live Agent Challenge** in the **Live Agents** category.
 
 ---
 
@@ -23,14 +23,14 @@ Independent landlords juggle three painful jobs:
 
 These are all repetitive, time-sensitive conversations that don't belong in dashboards — they belong in your phone and WhatsApp, handled by a smart, interruption-safe agent that's grounded in your actual portfolio data.
 
-**Our vision:** a live, multimodal "property operations team":
+**My vision:** a live, multimodal "property operations team":
 
 - **Sara**, the rent collection agent, who talks to tenants, calls them, and keeps the dashboard consistent
 - A maintenance agent that understands tenant messages on WhatsApp, creates structured tickets, and then calls vendors live to accept jobs
 
 ---
 
-## What We Built
+## What I Built
 
 PropStack is an end-to-end system with:
 
@@ -151,7 +151,6 @@ Tenants can report issues via WhatsApp — sending text messages with optional p
 | Deployment      | Google Cloud Run                                      |
 | Container       | Docker                                                |
 
-
 ---
 
 ## Key Agent Flows
@@ -202,6 +201,7 @@ Updates: maintenance_tickets, vendor_dispatch_logs
 PropStack’s agents are grounded via **Google ADK function tools** (plain Python functions) that read/write to Supabase and trigger Twilio workflows.
 
 ### Rent & Payments (`app/tools/rent_tools.py`)
+
 - `get_tenants_with_rent_status(landlord_id)`
 - `get_tenant_payment_history(tenant_id)`
 - `get_tenant_collection_history(tenant_id)`
@@ -210,17 +210,20 @@ PropStack’s agents are grounded via **Google ADK function tools** (plain Pytho
 - `list_units_for_landlord(landlord_id)`
 
 ### Tenant Lookup (`app/tools/tenant_tools.py`)
+
 - `find_tenant_by_name(name, landlord_id)`
 - `find_tenant_by_phone(phone, landlord_id)`
 - `update_tenant_details(tenant_id, name?, phone?, email?, preferred_language?)`
 
 ### Calls & Call Logs (`app/tools/call_tools.py`)
+
 - `initiate_rent_collection_call(landlord_id, tenant_id, tenant_name, tenant_phone, language, rent_amount, days_overdue, property_name, unit_number, landlord_name)`
 - `get_call_status(landlord_id, tenant_id?, call_id?)`
 - `save_call_result(call_id, transcript, outcome, duration_seconds, provider_metadata?)`
 - `save_call_result_from_agent(call_id, transcript, outcome, duration_seconds)`
 
 ### Rent Intelligence (grounded market research) (`app/tools/rent_intel_tools.py`)
+
 - `get_vacancy_cost_for_landlord(landlord_id, as_of_date?)`
 - `estimate_market_rent_for_unit(city, state?, unit_description, current_rent?)`
 - `analyze_rent_intelligence_for_landlord(landlord_id, sample_limit=5)`
@@ -354,6 +357,17 @@ For quick end-to-end testing with pre-populated sample data, you can sign in wit
 
 Use this account to explore the dashboard, rent flows, and maintenance tickets without having to seed everything from scratch.
 
+### End-to-end test flow
+
+You can test the full PropStack flow (from data setup through rent checks, calls, and logging) by following the step-by-step scenarios described in [`propstack-ai/TEST_PLAN.md`](./TEST_PLAN.md).
+
+That document covers:
+
+- Creating landlords, properties, units, and tenancies
+- Generating rent cycles
+- Triggering rent collection calls
+- Verifying call logs, summaries, and payment updates
+
 ---
 
 ## Data, Grounding & Safety
@@ -394,31 +408,6 @@ Use this account to explore the dashboard, rent flows, and maintenance tickets w
 
 ---
 
-## Future Work
-
-### Vision: Next-Gen RWA (Resident Welfare Association) Platform
-
-This project started as a vision to upgrade everyday apps like **MyGate** — a widely used RWA management platform — into an agentic, AI-powered system. While MyGate handles CRUD operations for society management, the world is moving toward agentic workflows. We envision integrating AI agents to handle:
-
-- **Automated visitor verification** with AI-powered security checks
-- **Smart maintenance dispatch** — agents that call vendors, negotiate prices, and schedule repairs
-- **AI community managers** — handling complaints, announcements, and resident communication
-- **Financial automation** — rent collection, invoice generation, and expense tracking with intelligent reminders
-- **Compliance & security** — AI agents that monitor suspicious activities and alert security
-
-PropStack demonstrates the core AI capabilities (voice agents, WhatsApp integration, live vendor calls) that can power the next generation of RWA platforms — making residential societies more secure, efficient, and tech-enabled.
-
----
-
-### Technical Roadmap
-
-- Richer call analytics (sentiment, outcome classification)
-- Sophisticated vendor selection (skills, geofencing)
-- Landlord configuration UI
-- Deeper multimodal (vendor seeing ticket photos during call)
-
----
-
 ## Project Structure
 
 ```
@@ -439,7 +428,7 @@ propstack-main/
 │
 ├── Dockerfile                  # Backend container
 ├── docker-compose.yml          # Local dev orchestration
-└── README.md                   # This file
+└── README.md                   # Readme file
 ```
 
 ---
@@ -450,27 +439,20 @@ propstack-main/
 
 ---
 
-## Google Cloud Deployment Proof
+## Future Work
 
-See `propstack-ai/app/config.py` for Vertex AI configuration:
+### Vision: Next-Gen RWA (Resident Welfare Association) Platform
 
-- `GOOGLE_GENAI_USE_VERTEXAI=TRUE`
-- `GOOGLE_CLOUD_PROJECT`
-- `GOOGLE_CLOUD_LOCATION`
+This project started as a vision to upgrade everyday apps like **MyGate** — a widely used RWA management platform — into an agentic, AI-powered system. While MyGate handles CRUD operations for society management, the world is moving toward agentic workflows. I envision integrating AI agents to handle:
 
-Cloud Run deployment commands are documented in the Setup section above.
+- **Automated visitor verification** with AI-powered security checks
+- **Smart maintenance dispatch** — agents that call vendors, negotiate prices, and schedule repairs
+- **AI community managers** — handling complaints, announcements, and resident communication
+- **Financial automation** — rent collection, invoice generation, and expense tracking with intelligent reminders
+- **Compliance & security** — AI agents that monitor suspicious activities and alert security
+
+PropStack demonstrates the core AI capabilities (voice agents, WhatsApp integration, live vendor calls) that can power the next generation of RWA platforms — making residential societies more secure, efficient, and tech-enabled.
 
 ---
-
-### End-to-end test flow
-
-You can test the full PropStack flow (from data setup through rent checks, calls, and logging) by following the step-by-step scenarios described in [`propstack-ai/TEST_PLAN.md`](./TEST_PLAN.md).
-
-That document covers:
-
-- Creating landlords, properties, units, and tenancies
-- Generating rent cycles
-- Triggering rent collection calls
-- Verifying call logs, summaries, and payment updates
 
 _Built with ❤️ for the Gemini Live Agent Challenge_
