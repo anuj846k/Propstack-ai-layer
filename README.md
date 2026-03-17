@@ -119,7 +119,7 @@ Click the image below to watch the recording proving the backend is running on G
 The landing page introduces PropStack and the “Sara” live agent experience for landlords.
 
 ![Landing Page Hero](https://storage.googleapis.com/propstack-bucket/assets/landing/Hero.png)
-![Landing Page Features](https://storage.googleapis.com/propstack-bucket/assets/landing/Hero.png)
+![Landing Page Features](https://storage.googleapis.com/propstack-bucket/assets/landing/Features.png)
 
 ### Dashboard (Landlord)
 
